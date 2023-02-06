@@ -1,0 +1,38 @@
+{% set name = "leotools" %}
+
+package:
+  name: {{ name }}
+  version: {{ load_setup_py_data().version }}
+
+source:
+  path: .
+
+build:
+  string: py38_gdal34
+  script: python setup.py install --single-version-externally-managed --record=record.txt
+  entry_points:
+    - {{ name }} = {{ name }}.__main__:main
+
+requirements:
+  host:
+    - python 3.8
+    - pip
+    - setuptools
+    - wheel
+  run:
+    - gdal <=3.4
+    - rasterio <=1.2
+    - geopandas
+
+test:
+  imports:
+    - {{ name }}.constants
+    - {{ name }}.basetools
+    - {{ name }}.gistools
+    - {{ name }}.preproc
+  commands:
+    - {{ name }} help
+
+outputs:
+  - name: {{ name }}
+    # type: wheel # needs an ssl connection
