@@ -1,6 +1,7 @@
 """This module contains often used constants."""
 
 from pathlib import Path
+
 from rasterio.profiles import Profile
 from rasterio.crs import CRS
 

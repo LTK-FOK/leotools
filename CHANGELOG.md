@@ -1,6 +1,28 @@
-# v0.7
+# v0.7.1
 
 ## Added
+
+- `preproc.s2_tile` now handles the processing baseline 4.0 change of Level-1C images.
+- The MIT License notice is now included in `LICENSE.txt`.
+- `__license__` module level variable.
+- More detailed install instructions to the readme.
+
+## Changed
+- Dependencies now include all directly imported packages.
+- `leotools` directory has been moved under `src`.
+- Build metadata has been moved from `setup.py` to `pyproject.toml`.
+
+## Fixed
+- Package building and installation using pip now works.
+- Functionality of `preproc.op_nc`.
+- `ovr` and `aux` args are now properly implemented for `preproc.make_extras`.
+- The `preproc` functions handling Landsat images have had their descriptions updated and now correctly say "Landsat 4-9". 
+- The functionality of Sentinel-2 L1C processing.
+
+# v0.7.0
+
+## Added
+
 - An external documentation in Hungarian in the README.md. English section has been removed.
 - `levels`, `compress`, `compress_level`, `predictor` args to `gistools.make_ovr` function.
 - `gistools.load_polygons` function.
@@ -17,6 +39,7 @@
 - `ls_kwargs` and `s2_kwargs` args to `preproc.reproj_tile` function.
 
 ## Changed
+
 - `basetools.load_inputs` has been renamed to `basetools.load_files`. It has also had its functionality overhauled. Now it only returns paths that exist.
 - `gistools.recode_array` has been renamed to `gistools.remap_array`. Its `rec_dict` arg has been renamed to `map_dict`.
 - The `all_bands` arg of `gistools.stack_images` has been replaced by the `band` arg, which decides which band to stack.
@@ -27,23 +50,27 @@
 - Sentinel-2 preprocessing now recalculates image values from the 4.0 processing baseline to the former 03.01 baseline.
 
 ## Removed
+
 - `basetools.load_params` and `basetools.interpret_params` functions. Functions using these have the functionality integrated into them. If you need to load in a dictionary from a plaintext file, use the `yaml` module.
 - `preproc.extract_ndxi` function and the associated commandline option.
 - Redundant `gistools.band_calc` function.
 - `gistools.recalc_dtype` function. Change the values and datatpye of the array in code. Also removed `multiply` and `add` args from `gistools.extract_bands`.
 
 ## Fixed
+
 - `basetools.ProcessTimer` is now imported into the `gistools` module.
 - `gistools.BandSelector` now casts read band to float, making its behavior more consistent.
 
 # v0.6.1
 
 ## Fixed
+
 - `image_to_array` error in Landsat processing.
 
-# v0.6
+# v0.6.0
 
 ## Added
+
 - `__version__`, `__author__`, `__email__`, `__description__` and `__license__` module level variables.
 - Support for the preprocessing of Landsat 4, 5 and 7 images.
 - The commandline help function now raises a ValueError if asked to help with a function that doesn't exist in the catalog.
@@ -55,41 +82,49 @@
 - The original band designations are now added to preprocessed images as band descriptions.
 
 ## Changed
+
 - `preproc.merge_datatake` now uses `basetools.load_inputs` for inputs.
 - `gistools.stack_images` now uses `basetools.load_inputs`  for inputs.
 - The `sample_tif` arg of `gistools.array_to_image` is now `sample_image`.
 - Certain functions got updated docstrings.
 
 ## Fixed
+
 - The `multi_mask` function now works if area an bound masks are not given.
 - `gistools.extract_bands` now evaluates expressions safely.
 
 # v0.5.2
 
 ## Fixed
+
 - Landsat 9 is now supported by the `preproc.merge_datatake` and `preproc.extract_ndxi`.
 
 # v0.5.1
 
 ## Added
+
 - Support for the preprocessing of Landsat 9 images.
 
-# v0.5
+# v0.5.0
 
 ## Changed
+
 - leotools is now a proper Python package.
 - The `leotools` command is now an entry point of the package, it can be used from anywhere as long as the installation environment is active.
 - Function kwargs in the commandline can now be specified with one or two hyphens.
 
 ## Removed
+
 - .conf files used for ndxi calculation. Now this data resides in the `constants` submodule.
 
 # v0.4.4
 
 ## Changed
+
 - inside the `__main__` module, the `main` functions handles the functions instead of the old `run_func` function.
 
 ## Fixed
+
 - `preproc.reformat` now runs without an error, correctly copies metadata for images.
 
 # v0.4.3
@@ -110,7 +145,7 @@
 
 - `preproc.reproj_tiles` input.
 
-# v0.4
+# v0.4.0
 
 ## Added
 
@@ -132,6 +167,7 @@
 - `basetools.ProcessTimer` now measures days and centiseconds.
 
 ## Removed
+
 - `basetools.path_matches` and `basetools.list_dir` functions.
 
 # v0.3.2
@@ -154,7 +190,7 @@
 
 - Datatake merging is now done band-by-band. This should deal with memory problems.
 
-# v0.3
+# v0.3.0
 
 ## Added
 
@@ -181,7 +217,7 @@
 
 - `preproc.merge_datatake` now accepts the same path as both an input and output directory. When starting, the directory should only contain unmerged tiles.
 
-# v0.2
+# v0.2.0
 
 ## Added
 
@@ -191,7 +227,8 @@
 
 - Instead of a single module, leotools is now a package containing three submodules.
 
-# v0.1
+# v0.1.0
 
 ## Added
+
 - `leo_def` is the first iteration of a unified code base

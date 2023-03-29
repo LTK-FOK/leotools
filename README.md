@@ -2,11 +2,58 @@ Ez a Lechner Earth Observation Toolset (leotools), egy python csomag, amelyet a 
 
 romeo.ife.komolafe@lechnerkozpont.hu
 
-# Telepítés és használat
+# Telepítés
 
-Telepítsd a leotools csomagot egy Python környezetbe conda vagy pip csomagkezelők segítségével. A leotools a `rasterio` és `geopandas` csomagokra hagyatkozik közvetlenül, ezek feltelepítésével minden más szükséges csomag is feltelepül. A csomag telepítője a forráskódból manuálisan is buildelhető.
+Telepítsd a leotools csomagot egy Python környezetbe conda vagy pip csomagkezelők segítségével!
 
-A leottols több módon is használható:
+## conda
+
+Telepítéshez a letöltött vagy az előzőleg buildelt `.tar.bz2` állományt adjuk meg.
+
+```bash
+conda install <dist>
+```
+
+Ha buildelni szeretnénk, először klónozzuk a csomag repository-ját. A conda környezetnek tartalmaznia kell a `conda-build`, `setuptools` és `wheel` csomagokat.
+
+```bash
+git clone https://github.com/LTK-FOK/leotools
+conda build leotools
+```
+
+## pip
+
+Telepíthetünk közvetlenül GitHubról.
+
+```bash
+pip install git+https://github.com/LTK-FOK/leotools
+```
+
+Telepíthetjük a letöltött vagy az előzőleg buildelt `.whl` vagy `tar.gz` állományt is.
+
+```bash
+pip install <dist>
+```
+
+Telepíthetünk közvetlenül a klónozott repository-ból.
+
+```bash
+git clone https://github.com/LTK-FOK/leotools
+cd leotools
+python setup.py install
+```
+
+Ha buildelni szeretnénk, a Python környezetnek tartalmaznia kell a `setuptools` és `wheel` csomagokat.
+
+```bash
+git clone https://github.com/LTK-FOK/leotools
+cd leotools
+python -m build
+```
+
+# Használat
+
+A leotools több módon is használható:
 
 1. Egyes almodulokat és eszközöket a megszokott módon lehet más Python szkriptekbe importálni.
 2. Bizonyos függvények a parancssorból is elérhetőek.
@@ -18,35 +65,35 @@ Ha a leotools telepítési környezete aktív, bizonyos függvények elérhetőe
 Megjeleníthetjük a súgót a `help` paranccsal.
 
 ```bash
-$ leotools help
+leotools help
 ```
 
 Az elérhető függvények listázhatók a `list` paranccsal.
 
 ```bash
-$ leotools list
+leotools list
 ```
 
 Az egyes függvények dokumentációja is kiiratható.
 
 ```bash
-$ leotools help preproc
+leotools help preproc
 ```
 
 Hasznos lehet kiiratni általános információkat gyakran használt argokról.
 
 ```bash
-$ leotools info
-$ leotools help info
+leotools info
+leotools help info
 ```
 
 Egy függvény így használható. Opcionális argokat kötőjelek segítségével adhatunk meg.
 
 ```bash
-$ leotools tile example.zip outdir -meta_dir outdir
+leotools tile example.zip outdir -meta_dir outdir
 ```
 
-# Importálási konvenciók
+## Importálási konvenciók
 
 Kiirathatjuk a csomag különböző információit.
 

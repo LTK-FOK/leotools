@@ -6,6 +6,10 @@ import fnmatch
 from tempfile import TemporaryDirectory
 import tarfile
 import zipfile
+import xml.etree.ElementTree as ET
+import re
+import operator
+
 import numpy as np
 import pandas as pd
 from osgeo import gdal
@@ -14,12 +18,10 @@ from rasterio.enums import Resampling
 from rasterio.merge import merge
 import geopandas as gpd
 from shapely.geometry import Polygon, box
+
 from leotools.constants import EOV, GTIFF_UINT16, GTIFF_UINT16_COMPATIBLE
 from leotools.basetools import ProcessTimer, check_path, load_files
 from leotools.gistools import round_extent, extract_bands, image_to_array, make_aux, make_ovr, get_tags
-import xml.etree.ElementTree as ET
-import re
-import operator
 
 ### Constants
 L47_BANDS = { ### number: name
@@ -241,7 +243,8 @@ def s2_tile(zip_file, image_dir, meta_dir=None, incl_gt=False, used_bands=None, 
         image_dir (path): Directory the GeoTIFF is extracted to.
         meta_dir (path, optional): Directory the metadata .xml is extracted to
             in a subdirectory with the same name as the image.
-        incl_gt (bool, optional): If true, the image's name will include generation time.
+        incl_gt (bool, optional): If true, the image's name will include
+            generation time.
         used_bands (list, optional): Bands included in the final image.
         mode (int, optional): Mode used for checking the output paths. Based on
             the `check_path` function.
@@ -303,11 +306,23 @@ def s2_tile(zip_file, image_dir, meta_dir=None, incl_gt=False, used_bands=None, 
         
         if proc_baseline >= 4:
             xml_path2 = f"{namespace}General_Info/Product_Image_Characteristics" ### Changing xml path
-            offset_path = f"{xml_path2}/BOA_ADD_OFFSET_VALUES_LIST/BOA_ADD_OFFSET"
+
+            ### Path differences based on processing level
+            if refl == 'boa': ### L2A
+                path_end = "/BOA_ADD_OFFSET_VALUES_LIST/BOA_ADD_OFFSET"
+            else: ### L1C
+                path_end = "/Radiometric_Offset_List/RADIO_ADD_OFFSET"
+
+            offset_path = f"{xml_path2}{path_end}"
             offsets = [float(root.find(f"{offset_path}[@band_id='{i}']").text) for i in band_idxs]
 
         ### Getting the bands
-        band_list = [fnmatch.filter(z.namelist(), f"*{k}_{v[0]}m.jp2")[0] for k, v in bands.items()]
+        if refl == 'boa': ### L2A
+            band_list = [fnmatch.filter(z.namelist(), f"*IMG_DATA/*{k}_{v[0]}m.jp2")[0] for k, v in bands.items()]
+        else: ### L1C
+            band_list = [fnmatch.filter(z.namelist(), f"*IMG_DATA/*{k}.jp2")[0] for k in bands.keys()]
+
+        print(band_list)
 
         ### Extracting metadata
         if meta_dir:
@@ -373,7 +388,7 @@ def s2_tile(zip_file, image_dir, meta_dir=None, incl_gt=False, used_bands=None, 
     timer.stop(f"Created {output_name}.tif")
 
 def reproj_tile(input_paths, image_dir, meta_dir=None, ls_kwargs=None, s2_kwargs=None, recursive=False, mode=0):
-    """Processes image archives. Handles Sentinel-2 and Landsat 8/9 images.
+    """Processes image archives. Handles Sentinel-2 and Landsat 4-9 images.
 
     Args:
         input_paths (path or list): Archive or a list or direcotry of archives.
@@ -433,11 +448,14 @@ def make_extras(input_paths, ovr=True, aux=True, recursive=False):
     subtimer = ProcessTimer()
     timer.start("\nExternal files made")
 
-    for i in image_list:
-        print(f"\nProcessing {i.name}")
-        subtimer.start(f"Extras made")
-        make_ovr(i)
-        make_aux(i)
+    if ovr or aux:
+        for i in image_list:
+            print(f"\nProcessing {i.name}")
+            subtimer.start(f"Extras made")
+            if ovr:
+                make_ovr(i)
+            if aux:
+                make_aux(i)
 
     subtimer.stop()
     timer.stop()
@@ -581,7 +599,7 @@ def merge_datatake(input_paths, image_output_dir, meta_dir=None, meta_output_dir
     timer.stop()
 
 def preproc(input_paths, image_output_dir, meta_output_dir=None, temp_dir=None, recursive=False, mode=0):
-    """Handles the full preprocessing of Landsat 8 and Sentinel 2 archives.
+    """Handles the full preprocessing of Landsat 4-9 and Sentinel 2 archives.
 
     It first creates tiled GeoTIFF images and metadata files in a temp
     directory and then merges and collects them respectively and places them
@@ -679,7 +697,7 @@ def op_cc(a, b):
 
 def op_nc(a, b):
     """Excludes operator function."""
-    return ~op_c(a, b)
+    return ~op_cc(a, b)
 
 def filter_images(file_list, expressions):
     """Filters a list of images based on tags.

@@ -2,6 +2,7 @@
 
 from pathlib import Path
 from math import ceil
+
 import numpy as np
 from osgeo import gdal
 import rasterio
@@ -9,6 +10,7 @@ import rasterio.mask
 from rasterio.enums import Resampling
 import geopandas as gpd
 from shapely.geometry import Polygon
+
 from leotools.basetools import load_files, ProcessTimer
 
 ### Metadata manipulation

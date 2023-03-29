@@ -1,31 +1,37 @@
-{% set name = "leotools" %}
+{% set pyproject = load_file_data('pyproject.toml', from_recipe_dir=True) %}
+{% set data = pyproject['project'] %}
+{% set name = data['name'] %}
+{% set python = data['requires-python'] %}
+{% set version = '0.7.1' %}
 
 package:
   name: {{ name }}
-  version: {{ load_setup_py_data().version }}
+  version: {{ version }}
 
 source:
   path: .
 
 build:
-  string: py38_gdal34
+  string: py38_gdal30
   script: python setup.py install --single-version-externally-managed --record=record.txt
+  include_recipe: False
   entry_points:
     - {{ name }} = {{ name }}.__main__:main
 
 requirements:
   host:
-    - python 3.8
-    - pip
-    - setuptools
-    - wheel
+    {% for req in pyproject['build-system'].get('requires', []) %}
+    - {{ req.lower() }}
+    {% endfor %}
   run:
-    - gdal <=3.4
-    - rasterio <=1.2
-    - geopandas
+    - python{{ python }}
+    {% for dep in data.get('dependencies', []) %}
+    - {{ dep.lower() }}
+    {% endfor %}
 
 test:
   imports:
+    - {{ name }}
     - {{ name }}.constants
     - {{ name }}.basetools
     - {{ name }}.gistools
@@ -35,4 +41,8 @@ test:
 
 outputs:
   - name: {{ name }}
-    # type: wheel # needs an ssl connection
+
+about:
+  description: {{ data.get('description') }}
+  license: MIT
+  license_file: LICENSE.txt
