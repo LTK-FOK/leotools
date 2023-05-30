@@ -2,7 +2,7 @@
 {% set data = pyproject['project'] %}
 {% set name = data['name'] %}
 {% set python = data['requires-python'] %}
-{% set version = '0.7.1' %}
+{% set version = '0.7.2' %}
 
 package:
   name: {{ name }}

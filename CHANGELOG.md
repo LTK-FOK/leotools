@@ -1,3 +1,9 @@
+# v0.7.2
+
+## Fixed
+- Sentinel-2 processing no longer prints the bands of the images.
+- The merging of S2 L1C tiles is now functional.
+
 # v0.7.1
 
 ## Added

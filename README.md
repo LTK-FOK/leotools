@@ -219,9 +219,9 @@ print(dir_contents)
 
 Az `str_out` argot `True`-ra állítva az alapértelmezett `pathlib.Path` objektum helyett az útvonalakat stringként kaphatjuk vissza.
 
-## Időzítés
+## Időmérés
 
-Időzítésre a `ProcessTimer` osztály szolgál. Amikor elindítjuk vagy megállítjuk az időzítőt, megadhatunk neki egy nevet, amit kiír, amikor megáll.
+Időmérésre a `ProcessTimer` osztály szolgál. Amikor elindítjuk vagy megállítjuk az időzítőt, megadhatunk neki egy nevet, amit kiír, amikor megáll.
 
 ```python
 from time import sleep

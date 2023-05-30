@@ -322,8 +322,6 @@ def s2_tile(zip_file, image_dir, meta_dir=None, incl_gt=False, used_bands=None, 
         else: ### L1C
             band_list = [fnmatch.filter(z.namelist(), f"*IMG_DATA/*{k}.jp2")[0] for k in bands.keys()]
 
-        print(band_list)
-
         ### Extracting metadata
         if meta_dir:
             zip_info = z.getinfo(meta_name)
@@ -485,7 +483,7 @@ def merge_datatake(input_paths, image_output_dir, meta_dir=None, meta_output_dir
     check_path(image_output_dir, mode)
     image_list = load_files(input_paths, '*.tif', recursive)
 
-    pattern = re.compile(r".*(\d{8}_(?:L[45789]|s2[ab])(?:_T\d)?_(?:\d{3}|r\d{2,3}))_(?:\d{2}|\w{3})_(boa_eov)(?:_\d{8}T\d{6})?.tif")
+    pattern = re.compile(r".*(\d{8}_(?:L[45789]|s2[ab])(?:_T\d)?_(?:\d{3}|r\d{2,3}))_(?:\d{2}|\w{3})_([bt]oa_eov)(?:_\d{8}T\d{6})?.tif")
     matches = [pattern.fullmatch(str(i)) for i in image_list]
     affixes = {i.group(1, 2) for i in matches if i} ### Extracting groups 1 and 2 from the match object
 

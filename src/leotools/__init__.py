@@ -8,7 +8,7 @@ leotools
 - preproc: Satellite image preprocessing tools.
 """
 
-__version__ = "0.7.1"
+__version__ = "0.7.2"
 # with open("VERSION.txt") as f:
 #     __version__ = f.read()
 
