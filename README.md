@@ -107,7 +107,7 @@ Az elérhető eszközöket a tartalmazó modulból kell importálnunk, azok nem 
 
 ```python
 from leotools import gistools as ltgt
-from leotools.basetools import ProcessTimer, load_files
+from leotools.gistools import get_profile, image_to_array
 ```
 
 Egy függvény vagy osztály belső dokumentációja a `__doc__` tulajdonságban van tárolva. Ez listázza az összes paramétert, amit megadhatunk neki.
@@ -156,7 +156,7 @@ check_path(path, mode=1)
 | 1      | Létrehozza az útvonal végpontját, de hibát dob, ha a szülők hiányoznak. |
 | 2      | Létrehozza az útvonal összes hiányzó elemét.                 |
 
-## Útvonalak betöltése
+## Útvonalak betöltése és kezelése
 
 Útvonalakat több forrásból tölthetünk be a `load_files` függvény segítségével. Érdemes abszolút útvonalakat használni. Ha az útvonalban visszaperek vannak, használjunk `r"D:\files\subdir\ex4.tif"` formátumú "raw" stringet.
 
@@ -219,7 +219,25 @@ print(dir_contents)
 
 Az `str_out` argot `True`-ra állítva az alapértelmezett `pathlib.Path` objektum helyett az útvonalakat stringként kaphatjuk vissza.
 
+A `FileContainer` osztály közös módot biztosít a mappákban, .zip és .tar fájlokban tárolt fájlok kezeléséhez.
+
+```python
+with FileContainer("example.zip") as c:
+    file_name = c.filter('*myfile.txt')[0] ### Adott fájl útvonalának kiszűrése
+    file = c.get(file_name) ### Fájl előkészítése elérésre
+    c.extract(file, "out_dir/myfile.txt") ### Kimásolja az adott fájlt a megadott elárási útra
+
+### Eredmény: out_dir/myfile.txt
+```
+
 ## Időmérés
+
+A `timestamp` fügvénnyel kiírhatunk egy időbelyeget.
+
+```python
+timestamp()
+# 2024-05-22 08:40:11
+```
 
 Időmérésre a `ProcessTimer` osztály szolgál. Amikor elindítjuk vagy megállítjuk az időzítőt, megadhatunk neki egy nevet, amit kiír, amikor megáll.
 
@@ -512,7 +530,7 @@ print(NDXI_S2['grvi'])
 
 ## Stackelés
 
-Több képet stackelhetünk a `stack_images` függvénnyel.
+A `stack_images` függvénnyel több képet stackelhetünk.
 
 ```python
 stack_images("input_dir", "stacked.tif")
@@ -539,21 +557,34 @@ A bands.csv tartalma:
 Ha tömböket szeretnénk stackelni, használjuk a `stack_arrays` függvényt. Ennek eredményét elmenthetjük képként az `array_to_image` függvény segítségével. Használhatunk egyszerre 2 dimenziós (y, x) és 3 dimenziós (sávszám, y, x) tömböket is.
 
 ```python
-array1 = image_to_array(r"D:\romeo\out\20220311_L8_T1_186_boa_eov.tif", 1)
+array1 = image_to_array("20220311_L8_T1_186_boa_eov.tif", 1)
 print(array1.shape)
 # (8100, 7990)
 
-array2 = image_to_array(r"D:\romeo\out\20220311_L8_T1_186_boa_eov.tif", [2])
+array2 = image_to_array("20220311_L8_T1_186_boa_eov.tif", [2])
 print(array2.shape)
 # (1, 8100, 7990)
 
-array3 = image_to_array(r"D:\romeo\out\20220311_L8_T1_186_boa_eov.tif", [3, 4, 5])
+array3 = image_to_array("20220311_L8_T1_186_boa_eov.tif", [3, 4, 5])
 print(array3.shape)
 # (3, 8100, 7990)
 
 stacked_array = stack_arrays([array1, array2, array3])
 print(stacked_array.shape)
 # (5, 8100, 7990)
+```
+
+## Mozaikolás
+
+Több képet a `merge_images` függvénnyel mozaikolhatunk.
+
+```python
+merge_images("input_dir", "merged.tif")
+### Eredmény: merged.tif
+
+### Egy különösen nagy méretű kép mozaikolása
+merge_images("input_dir", "merged.tif", profile={'BIGTIFF':'YES'})
+### Eredmény: merged.tif
 ```
 
 ## OVR és AUX fájlok előállítása
@@ -565,12 +596,23 @@ make_ovr("example.tif", levels=[2, 4, 8])
 ### Eredmény: example.tif.ovr
 ```
 
-A kép spektraális statisztikáit kiírhatjuk egy .aux fájlba.
+A kép spektrális statisztikáit kiírhatjuk egy .aux fájlba.
 
 ```python
 make_aux("example.tif")
 ### Eredmény: example.tif.aux.xml
 ```
+
+## Átvetítés
+
+Vetületi konverziót a `reproj_image` függvénnyel hajthatunk végre.
+
+```python
+reproj_image("input.tif", "reprojected.tif", resolution=100, crs="EPSG:23700", round=300)
+### Eredmény: reprojected.tif
+```
+
+Ha nem adunk meg `crs`-t, a kimeneti kép megtartja a bemeneti kép vetületét, és csak a `resolution`-t változtatjuk.
 
 # Előfeldolgozás
 
@@ -588,7 +630,9 @@ preproc("input_dir", "output_dir", meta_output_dir="meta_dir")
 
 Ha az archívumokból képeket szeretnénk csinálni mozaikolás nélkül, használjuk a `reproj_tile` függvényt.
 
-Az `ls_kwargs` és `s2_kwargs` argok segítésgével argokat továbbíthatunk a Landsat és Sentinel-2 feldolgozásoknak. A `used_bands` arggal meghatározhatjuk, hogy melyik sávokat szeretnénk látni a feldolgozott képben. Az `incl_gt` arg Sentinel-2 felvételeknél a generálás időpontját a név mögé rakja.
+Az `ls_kwargs` és `s2_kwargs` argok segítésgével argokat továbbíthatunk a Landsat és Sentinel-2 feldolgozásoknak. A `dtype` és `used_bands` argokkal meghatározhatjuk az adattípust és, hogy melyik sávokat szeretnénk látni a feldolgozott képben. Az `incl_gt` arg Sentinel-2 felvételeknél a generálás időpontját a név mögé rakja.
+
+A felvételek feldolgozásánál használható sávok a `L47_BANDS`, `L89_BANDS` és `S2_BANDS` változókban érhetők el.
 
 ```python
 l8_zip = "LC08_L2SP_186026_20220311_20220321_02_T1.tar"
@@ -597,7 +641,11 @@ s2_zip = "S2A_MSIL2A_20220102T095411_N0301_R079_T34TCR_20220102T114458.zip"
 reproj_tile(l8_zip, "output_dir")
 ### Eredmény: output_dir/20220311_L8_T1_186_26_boa_eov.tif
 
-### Ha ssak az első 3 sávot használjuk, a 
+### Landsat 8 sávok kiírása
+print(L89_BANDS)
+# {'B1': 'Coastal aerosol', 'B2': 'Blue', 'B3': 'Green', 'B4': 'Red', 'B5': 'NIR', 'B6': 'SWIR 1', 'B7': 'SWIR 2', 'B8': 'Panchromatic', 'B9': 'Cirrus', 'B10': 'TIRS 1', 'B11': 'TIRS 2', 'QA_PIXEL': 'Pixel QA', 'QA_RADSAT': 'Radiometric saturation QA', 'QA_AEROSOL': 'Surface reflectance QA'}
+
+### Ha csak az első 3 sávot használjuk
 reproj_tile(
     [l8_zip, s2_zip],
     "output_dir",
@@ -652,7 +700,7 @@ Az elkészült képek listáját megszűrhetjük a metaadat címkéik alapján.
 A `list_uniques` függvény segítségével kilistázhatjuk egy-egy címke egyedi értékeit.
 
 ```python
-file_list = load_files(r"D:\image_dir")
+file_list = load_files("image_dir")
 
 uniqe_path = list_uniques(file_list, 'path')
 print(unique_path)

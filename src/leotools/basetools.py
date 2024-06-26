@@ -3,8 +3,17 @@
 from pathlib import Path
 import time
 import fnmatch
+import shutil
+import zipfile
+import tarfile
 
 ### Basic stuff
+
+def timestamp():
+    """Prints a timestamp."""
+    time_format = '%Y-%m-%d %H:%M:%S'
+    ts = time.strftime(time_format, time.localtime(time.time()))
+    print(ts)
 
 class ProcessTimer:
     """A class for measuring process runtimes.
@@ -68,11 +77,11 @@ def check_path(path, mode=0):
     
     There are three modes available:
         0 - Raise error if path does not exist.
-        1 - Create path and raise error if parents are missing.
-        2 - Create path with all its missing parents.
+        1 - Create path (if directory) and raise error if parents are missing.
+        2 - Create path (if directory) with all its missing parents.
 
     Args:
-        path (path or str): The path to check.
+        path (path): The path to check.
         mode (int): Decides what happens if the path is missing. Can be 0, 1, 2.
 
     Returns:
@@ -137,8 +146,8 @@ def load_files(paths, pattern='*.*', recursive=False, str_out=False):
         file_list = []
 
         for i in paths:
+            i = Path(i)
             if i.exists(): ### Nonexistent paths are simply not included
-                i = Path(i)
 
                 ### Directories are globbed
                 if i.is_dir():
@@ -152,3 +161,124 @@ def load_files(paths, pattern='*.*', recursive=False, str_out=False):
 
     else:
         raise TypeError("Paths need to match the pattern or be a list or directory.")
+    
+### File Container
+
+class DirInterface:
+    """File container interface for accessing directories."""
+    def __init__(self, cont_path):
+        self.container = Path(cont_path)
+    
+    def filter(self, pattern):
+        """Returns a list of files that fit the pattern."""
+        return list(self.container.rglob(pattern))
+
+    def get(self, filename):
+        """Returns a path or file-like object to work on."""
+        if Path(filename).exists():
+            return filename
+        else:
+            raise FileNotFoundError(f"{filename} does not exist.")
+
+    def extract(self, filename, out_path):
+        """Copies a file to another location."""
+        shutil.copy(filename, out_path)
+
+    def close(self):
+        pass
+
+class ZIPInterface:
+    """File container interface for accessing .zip files."""
+    def __init__(self, cont_path):
+        self.container = zipfile.ZipFile(cont_path, 'r')
+    
+    def filter(self, pattern):
+        """Returns a list of files that fit the pattern."""
+        return fnmatch.filter(self.container.namelist(), pattern)
+
+    def get(self, filename):
+        """Returns a path or file-like object to work on."""
+        return self.container.open(filename)
+
+    def extract(self, filename, out_path):
+        """Copies a file to another location."""
+        zip_info = self.container.getinfo(filename)
+        out_path = Path(out_path)
+        zip_info.filename = out_path.name
+        self.container.extract(zip_info, out_path.parent)
+
+    def close(self):
+        self.container.close()
+
+class TARInterface:
+    """File container interface for accessing .tar files."""
+    def __init__(self, cont_path):
+        self.container = tarfile.open(cont_path, 'r')
+    
+    def filter(self, pattern):
+        """Returns a list of files that fit the pattern."""
+        return fnmatch.filter(self.container.getnames(), pattern)
+
+    def get(self, filename):
+        """Returns a path or file-like object to work on."""
+        return self.container.extractfile(filename)
+
+    def extract(self, filename, out_path):
+        """Copies a file to another location."""
+        tar_info = self.container.getmember(filename)
+        out_path = Path(out_path)
+        tar_info.name = out_path.name
+        self.container.extract(tar_info, out_path.parent)
+
+    def close(self):
+        self.container.close()
+    
+class FileContainer:
+    """Context manager to provide standardize handling of file containers.
+
+    Use the `with` statement.
+    
+    Args:
+        cont_path (path): Path to the file container.
+        cont_type (str, optional): Type of the container (dir, zip or tar).
+            Attempts to detect it if not provided.
+    """
+    def __init__(self, cont_path, cont_type=None):
+
+        cont_path = Path(cont_path)
+        
+        if cont_type:
+            subclasses = {
+                'zip': ZIPInterface,
+                'tar': TARInterface,
+                'dir': DirInterface,
+            }
+
+            if cont_type not in subclasses.keys():
+                raise ValueError("Unknown container type.")
+
+            self.interface = subclasses[cont_type](cont_path)
+        
+        else:
+            if cont_path.is_dir():
+                self.interface = DirInterface(cont_path)
+
+            else:
+                suffix = cont_path.suffix
+
+                if suffix == '.zip':
+                    self.interface = ZIPInterface(cont_path)
+
+                elif suffix in ['.tar', '.tgz', '.tbz', '.txz', '.gz', '.bz2', '.xz']:
+                    self.interface = TARInterface(cont_path)
+
+                else:
+                    raise ValueError("Unknown container type.")
+
+    def __enter__(self):
+        return self.interface
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.interface.close()
+        if exc_type is not None:
+            return False

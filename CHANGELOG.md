@@ -1,3 +1,34 @@
+# v0.8.0
+
+## Added
+- `basetools.timestamp` function.
+- `gistools.get_desc` function.
+- `gistools.merge_images` function. It has also been added as a command line function.
+- `gistools.reproj_image` function. It has also been added as a command line function.
+- `DirInterface`, `ZIPInterface`, `TARInterface` and `FileContainer` classes to `basetools`.
+- Path checking for outputs and the `mode` arg to `array_to_image`, `extract_bands`, `stack_images`, `merge_images` and `multi_mask` functions in the `gistools` submodule.
+- `dst_crs` arg to `gistools.calc_transform` function.
+- `verbose` arg to `gistools.stack_images` function.
+- `dtype` arg to `preproc.ls_tile`, `dtype` and `ignore_pb` args to `preproc.s2_tile`.
+- QA_PIXEL, QA_RADSAT, QA_CLOUD_QA bands to the list of extractable Landsat 4-7 bands. QA_PIXEL, QA_RADSAT, QA_AEROSOL bands to the list of extractable Landsat 8-9 bands. AOT, WVP, SCL bands to the list of extractable Sentinel-2 bands.
+
+## Changed
+- `calc_transform` function was relocated from the `preproc` to the `gistools` module.
+- `reproj_tile` and `merge_datatake` functions in the `preproc` submodule have been renamed to `reproj_tiles` and `merge_datatakes` respectively.
+- `src_bounding box` arg of the `gistools.calc_transform` function has been renamed to `bounding_box`. Now it also accepts a list of extent bounds as an input.
+- `tar_file` arg of the `preproc.ls_tile` function has been renamed to `input_file`.
+- `zip_file` arg of the `preproc.l2_tile` function has been renamed to `input_file`.
+- `bounding_box` arg of `gistools.calc_transform` has been renamed to `bounds`.
+- `num` and `resolution` args of the `gistools.round_to` function have been renamed to `x` and `y`.
+- `resolution` arg of the `gistools.round_extent` function has been renamed to `grid`.
+- `ls_tile` and `s2_tile` functions don't put metadata xml files into separate folders anymore.
+- `src_crs` and `dst_crs` args of the `gistools.calc_transform` function are now required. The default of the `dst_round` arg is now 0 instead of 300.
+
+## Fixed
+- `basetools.load_files` can now handle a list of strings as an input.
+- `gistools.calc_transform` now does the rounding if a `src_crs` is not given.
+- `gistools.BandSelector` now retains the datatype of the original image`
+
 # v0.7.2
 
 ## Fixed
@@ -14,6 +45,7 @@
 - More detailed install instructions to the readme.
 
 ## Changed
+
 - Dependencies now include all directly imported packages.
 - `leotools` directory has been moved under `src`.
 - Build metadata has been moved from `setup.py` to `pyproject.toml`.
@@ -49,7 +81,7 @@
 - `basetools.load_inputs` has been renamed to `basetools.load_files`. It has also had its functionality overhauled. Now it only returns paths that exist.
 - `gistools.recode_array` has been renamed to `gistools.remap_array`. Its `rec_dict` arg has been renamed to `map_dict`.
 - The `all_bands` arg of `gistools.stack_images` has been replaced by the `band` arg, which decides which band to stack.
-- The `make_ovr` and `make_aux` functons were relocated from the `preproc` to the `gistools` modules.
+- The `make_ovr` and `make_aux` functons were relocated from the `preproc` to the `gistools` module.
 - The `gistools.multi_mask` function can now handle shapely Polygons and geopandas GeoSeries but does not use the `load_files` function.
 - The default value of the `invert` arg of `gistools.multi_mask` function is now `False`.
 - The `invert` tag of `gistools.mask_array` works in reverse now.

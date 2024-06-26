@@ -26,12 +26,14 @@ import leotools.preproc as ltpp
 # Catalog of outside functions
 outside_catalog = {
     'profile': ltgt.print_profile,
-    'tile': ltpp.reproj_tile,
-    'datatake': ltpp.merge_datatake,
+    'tile': ltpp.reproj_tiles,
+    'datatake': ltpp.merge_datatakes,
     'preproc': ltpp.preproc,
     'reformat': ltpp.reformat,
     'extras': ltpp.make_extras,
     'stack': ltgt.stack_images,
+    'merge': ltgt.merge_images,
+    'reproj': ltgt.reproj_image,
 }
 
 ### Inner functions, not included in the catalogue
@@ -115,7 +117,7 @@ inside_catalog = {
     'info': info_func,
 }
 
-### Full functoin catalog
+### Full function catalog
 CATALOG = {**inside_catalog, **outside_catalog}
 
 def main():

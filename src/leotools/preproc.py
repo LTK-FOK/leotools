@@ -4,24 +4,19 @@ from pathlib import Path
 from shutil import copy
 import fnmatch
 from tempfile import TemporaryDirectory
-import tarfile
-import zipfile
 import xml.etree.ElementTree as ET
 import re
 import operator
 
 import numpy as np
 import pandas as pd
-from osgeo import gdal
 import rasterio
 from rasterio.enums import Resampling
-from rasterio.merge import merge
-import geopandas as gpd
 from shapely.geometry import Polygon, box
 
-from leotools.constants import EOV, GTIFF_UINT16, GTIFF_UINT16_COMPATIBLE
-from leotools.basetools import ProcessTimer, check_path, load_files
-from leotools.gistools import round_extent, extract_bands, image_to_array, make_aux, make_ovr, get_tags
+from .constants import EOV, GTIFF_UINT16, GTIFF_UINT16_COMPATIBLE
+from .basetools import ProcessTimer, check_path, load_files, FileContainer
+from .gistools import calc_transform, image_to_array, make_aux, make_ovr, get_tags, get_desc, merge_images
 
 ### Constants
 L47_BANDS = { ### number: name
@@ -33,6 +28,9 @@ L47_BANDS = { ### number: name
     'B6': 'TIR', ### Normally unused
     'B7': 'SWIR',
     'B8': 'Panchromatic', ### Only in Landsat 7, Normally unused
+    'QA_PIXEL': 'Pixel QA', ### Normally unused
+    'QA_RADSAT': 'Radiometric saturation QA', ### Normally unused
+    'CLOUD_QA': 'Surface reflectance cloud QA', ### Only in BOA, Normally unused
 }
 
 L89_BANDS = { ### number: name
@@ -47,6 +45,9 @@ L89_BANDS = { ### number: name
     'B9': 'Cirrus', ### Normally unused
     'B10': 'TIRS 1', ### Normally unused
     'B11': 'TIRS 2', ### Normally unused
+    'QA_PIXEL': 'Pixel QA', ### Normally unused
+    'QA_RADSAT': 'Radiometric saturation QA', ### Normally unused
+    'QA_AEROSOL': 'Surface reflectance QA', ### Normally unused
 }
 
 S2_BANDS = { ### number: (resolution, name)
@@ -63,50 +64,23 @@ S2_BANDS = { ### number: (resolution, name)
     'B10': (60, 'Cirrus'), ### Normally unused
     'B11': (20, 'SWIR 1'),
     'B12': (20, 'SWIR 2'),
+    'AOT': (10, 'Aerosol Optical Thickness'), ### Normally unused
+    'WVP': (10, 'Water Vapor Pressure'), ### Normally unused
+    'SCL': (20, 'Scene Classification'), ### Normally unused
+    ### TCI band not implemented
 }
 
-def calc_transform(src_bounding_box, dst_resolution, src_crs=None, dst_round=300):
-    """Calculates source and destination transforms from provided parameters.
-
-    Args:
-        src_bounding_box (list): Coordinates of the source bounding box.
-        dst_resolution (int): Destination resolution in meters.
-        src_crs (str, optional): Projection of the source.
-        dst_round (number, optional): The resolution to round to.
-
-    Returns:
-        dst_transform (dict): Destination transform.
-        dst_width (int): Width of the destination in pixels.
-        dst_height (int): Height of the destination in pixels.
-    """
-
-    if src_crs:
-        extent_utm = gpd.GeoSeries(src_bounding_box, crs=src_crs)
-        extent_eov = round_extent(extent_utm.to_crs(EOV).total_bounds, dst_round)
-    else:
-        extent_eov =  src_bounding_box.bounds
-
-    ### Reprojection
-    dst_width = int((extent_eov[2]-extent_eov[0])/dst_resolution)
-    dst_height = int((extent_eov[3]-extent_eov[1])/dst_resolution)
-
-    dst_transform = rasterio.transform.from_bounds(
-        *extent_eov,
-        width=dst_width,
-        height=dst_height,
-    )
-
-    return dst_transform, dst_width, dst_height
-
-def ls_tile(tar_file, image_dir, meta_dir=None, used_bands=None, mode=0):
+def ls_tile(input_file, image_dir, meta_dir=None, used_bands=None, dtype='uint16', mode=0):
     """Exports a GeoTIFF and a metadata from a Landsat 4-9 archive.
 
     Args:
-        tar_file (path): A Landsat 4-9 archive. Has to be a .tar or .tar.gz file.
+        input_file (path): A Landsat 4-9 archive as a .tar file or directory.
         image_dir (path): Directory the GeoTIFF is extracted to.
         meta_dir (path, optional): Directory the metadata .txt is extracted to
             in a subdirectory with the same name as the image.
-        used_bands (list, optional): Bands included in the final image.
+        used_bands (list, optional): Bands included in the final image. Bands
+            are not duplicated, only the first mention is used.
+        dtype (str): Data type of the output image.
         mode (int, optional): Mode used for checking the output paths. Based on
             the `check_path` function.
 
@@ -114,36 +88,27 @@ def ls_tile(tar_file, image_dir, meta_dir=None, used_bands=None, mode=0):
         None
     """
     
-    dtype = 'uint16'
     resolution = 30
     src_nodata = 0
     dst_nodata = 0
 
-    ### Checking paths
     check_path(image_dir, mode)
     if meta_dir:
         check_path(meta_dir, mode)
 
-    tar_file = Path(tar_file)
+    input_file = Path(input_file)
 
     ### Printing and timing
-    print(f"Processing {tar_file.name}")
+    print(f"Processing {input_file.name}")
     timer = ProcessTimer()
     timer.start()
 
-    if tar_file.match("*.tar.gz"):
-        mode = 'r:gz'
-    elif tar_file.match("*.tar"):
-        mode = 'r:'
-    else:
-        raise ValueError(f"{tar_file} is not a .tar or .tar.gz file.")
-
     ### Handling the tar file
-    with tarfile.open(tar_file, mode) as t:
+    with FileContainer(input_file) as c:
 
         ### Loading in metadata
-        meta_name = next((i for i in t.getnames() if i.endswith("_MTL.xml")))
-        meta = ET.parse(t.extractfile(meta_name))
+        meta_name = c.filter("*_MTL.xml")[0]
+        meta = ET.parse(c.get(meta_name))
         root = meta.getroot()
 
         ### Collecting name parameters
@@ -171,14 +136,14 @@ def ls_tile(tar_file, image_dir, meta_dir=None, used_bands=None, mode=0):
                 used_bands = ['B1', 'B2', 'B3', 'B4', 'B5', 'B7']
             bands = {i: L47_BANDS[i] for i in used_bands}
 
-        image_list = [fnmatch.filter(t.getnames(), f"*_{i}.TIF")[0] for i in bands]
-        band_list = [image_to_array(t.extractfile(i), 1) for i in image_list]
+        image_list = [c.filter(f"*_{i}.TIF")[0] for i in bands]
+        band_list = [image_to_array(c.get(i), 1) for i in image_list]
         src_array = np.stack(band_list, axis=0)
         src_shape = src_array.shape ### bands, height, width
 
         ### Extracting metadata
         if meta_dir:
-            t.extract(meta_name, Path(meta_dir, output_name))
+            c.extract(meta_name, Path(meta_dir, output_name + '.xml'))
 
     bounding_box = Polygon([
         (
@@ -192,7 +157,7 @@ def ls_tile(tar_file, image_dir, meta_dir=None, used_bands=None, mode=0):
 
     src_transform = rasterio.transform.from_bounds(*(bounding_box.bounds), width=src_shape[2], height=src_shape[1])
 
-    dst_transform, dst_width, dst_height = calc_transform(bounding_box, resolution, utm)
+    dst_transform, dst_width, dst_height = calc_transform(bounding_box, resolution, utm, EOV, 300)
 
     dst_array, dst_transform = rasterio.warp.reproject(
         source=src_array,
@@ -212,6 +177,7 @@ def ls_tile(tar_file, image_dir, meta_dir=None, used_bands=None, mode=0):
     )
 
     profile = GTIFF_UINT16(
+        dtype=dtype,
         width=dst_width,
         height=dst_height,
         count=src_shape[0],
@@ -235,19 +201,23 @@ def ls_tile(tar_file, image_dir, meta_dir=None, used_bands=None, mode=0):
 
     timer.stop(f"Created {output_name}.tif")
 
-def s2_tile(zip_file, image_dir, meta_dir=None, incl_gt=False, used_bands=None, mode=0):
+def s2_tile(input_file, image_dir, meta_dir=None, used_bands=None, dtype='uint16', mode=0, incl_gt=False, ignore_pb=False):
     """Exports a GeoTIFF and a metadata from a Sentinel-2 archive.
 
     Args:
-        zip_file (path): A Sentinel 2 archive. Has to be a .zip file.
+        input_file (path): A Sentinel 2 archive as a .zip file or directory.
         image_dir (path): Directory the GeoTIFF is extracted to.
         meta_dir (path, optional): Directory the metadata .xml is extracted to
             in a subdirectory with the same name as the image.
-        incl_gt (bool, optional): If true, the image's name will include
-            generation time.
-        used_bands (list, optional): Bands included in the final image.
+        used_bands (list, optional): Bands included in the final image. Bands
+            are not duplicated, only the first mention is used.
+        dtype (str): Data type of the output image.
         mode (int, optional): Mode used for checking the output paths. Based on
             the `check_path` function.
+        incl_gt (bool, optional): If true, the image's name will include
+            generation time.
+        ignore_pb (bool): Ignore the processing baseline of the image and the
+            associated calculations.
 
     Returns:
         None
@@ -259,82 +229,76 @@ def s2_tile(zip_file, image_dir, meta_dir=None, incl_gt=False, used_bands=None, 
     bands = {i: S2_BANDS[i] for i in used_bands}
     band_idxs = [list(S2_BANDS.keys()).index(i) for i in used_bands] ### Indexing from 0
 
-    dtype = 'uint16'
     resolution = 10
     src_nodata = 0
     dst_nodata = 0
 
-    ### Checking paths
     check_path(image_dir, mode)
     if meta_dir:
         check_path(meta_dir, mode)
 
-    zip_file = Path(zip_file)
+    input_file = Path(input_file)
 
     ### Printing and timing
-    print(f"Processing {zip_file.name}")
+    print(f"Processing {input_file.name}")
     timer = ProcessTimer()
     timer.start()
 
-    if not zip_file.match("*.zip"):
-        raise ValueError(f"{zip_file} is not a .zip file.")
-
     ### Handling the zip file
-    with zipfile.ZipFile(zip_file, 'r') as z:
-        meta_name = fnmatch.filter(z.namelist(), "*MTD_MSI???.xml")[0]
-        meta = ET.parse(z.open(meta_name))
-        root = meta.getroot()
-        namespace = '{' + root.attrib['{http://www.w3.org/2001/XMLSchema-instance}schemaLocation'] + '}'
-        xml_path = f"{namespace}General_Info/Product_Info"
+    with FileContainer(input_file) as c:
+        meta_name = c.filter("*MTD_MSI???.xml")[0]
+        root = ET.parse(c.get(meta_name)).getroot()
+        
+        namespace = '{' + root.attrib['{http://www.w3.org/2001/XMLSchema-instance}schemaLocation'] + '}General_Info'
+        general_info = ET.parse(c.get(meta_name)).getroot().find(namespace)
+        product_info = [i for i in general_info if i.tag.endswith('Product_Info')][0]
+        product_uri = [i for i in product_info if i.tag.startswith('PRODUCT_URI')][0].text
 
         ### Collecting name parameters
-        date = root.find(f"{xml_path}/PRODUCT_START_TIME").text[:10].replace('-', '')
-        sat = root.find(f"{xml_path}/PRODUCT_URI").text[:3].lower()
-        orbit = root.find(f"{xml_path}/PRODUCT_URI").text[33:37].lower()
-        tile = root.find(f"{xml_path}/PRODUCT_URI").text[41:44].lower()
-        refl = 'boa' if root.find(f"{xml_path}/PROCESSING_LEVEL").text == 'Level-2A' else 'toa'
-        gen_time = root.find(f"{xml_path}/PRODUCT_URI").text[44:-5] if incl_gt else '' ### This includes underscore
+        date = product_info.find('PRODUCT_START_TIME').text[:10].replace('-', '')
+        sat = product_uri[:3].lower()
+        orbit = product_uri[33:37].lower()
+        tile = product_uri[41:44].lower()
+        refl = 'boa' if product_info.find('PROCESSING_LEVEL').text.startswith('Level-2A') else 'toa'
+        gen_time = product_uri[44:-5] if incl_gt else '' ### This includes underscore
 
         output_name = f"{date}_{sat}_{orbit}_{tile}_{refl}_eov{gen_time}"
         image_path = Path(image_dir, output_name + ".tif")
 
         ### Getting the ID of the source image
-        source = root.find(f"{xml_path}/PRODUCT_URI").text[:-5]
+        source = product_uri[:-5]
 
-        ### Getting the processing baseline and offset values for recalculating to the old baseline
-        proc_baseline = float(root.find(f"{xml_path}/PROCESSING_BASELINE").text)
-        
-        if proc_baseline >= 4:
-            xml_path2 = f"{namespace}General_Info/Product_Image_Characteristics" ### Changing xml path
+        offset_paths = [
+            "Product_Image_Characteristics/BOA_ADD_OFFSET_VALUES_LIST/BOA_ADD_OFFSET", ### L2A
+            "Product_Image_Characteristics/Radiometric_Offset_List/RADIO_ADD_OFFSET", ### L1C
+        ]
 
-            ### Path differences based on processing level
-            if refl == 'boa': ### L2A
-                path_end = "/BOA_ADD_OFFSET_VALUES_LIST/BOA_ADD_OFFSET"
-            else: ### L1C
-                path_end = "/Radiometric_Offset_List/RADIO_ADD_OFFSET"
+        offset_values = None
 
-            offset_path = f"{xml_path2}{path_end}"
-            offsets = [float(root.find(f"{offset_path}[@band_id='{i}']").text) for i in band_idxs]
+        for i in offset_paths:
+            if general_info.find(i) is not None:
+                offset_elements = [general_info.find(f"{i}[@band_id='{j}']") for j in band_idxs]
+                offset_values = [float(j.text) if j is not None else 0.0 for j in offset_elements]
+                break
 
         ### Getting the bands
         if refl == 'boa': ### L2A
-            band_list = [fnmatch.filter(z.namelist(), f"*IMG_DATA/*{k}_{v[0]}m.jp2")[0] for k, v in bands.items()]
+            band_list = [c.filter(f"*IMG_DATA/R{v[0]}m/*{k}_{v[0]}m.jp2")[0] for k, v in bands.items()]
         else: ### L1C
-            band_list = [fnmatch.filter(z.namelist(), f"*IMG_DATA/*{k}.jp2")[0] for k in bands.keys()]
-
+            band_list = [c.filter(f"*IMG_DATA/*{k}.jp2")[0] for k in bands.keys()]
+        
         ### Extracting metadata
         if meta_dir:
-            zip_info = z.getinfo(meta_name)
-            zip_info.filename = root.find(f"{xml_path}/PRODUCT_URI").text[:-5] + ".xml"
-            z.extract(zip_info, Path(meta_dir, output_name))
+            c.extract(meta_name, Path(meta_dir, output_name + '.xml'))
 
-        with rasterio.open(z.open(band_list[0])) as src:
+        with rasterio.open(c.get(band_list[0])) as src:
             bounding_box = box(*(src.bounds))
             utm = src.crs
 
-        dst_transform, dst_width, dst_height = calc_transform(bounding_box, resolution, utm)
+        dst_transform, dst_width, dst_height = calc_transform(bounding_box, resolution, utm, EOV, 300)
 
         profile = GTIFF_UINT16(
+            dtype=dtype,
             width=dst_width,
             height=dst_height,
             count=len(band_list),
@@ -346,7 +310,7 @@ def s2_tile(zip_file, image_dir, meta_dir=None, incl_gt=False, used_bands=None, 
         ### Writing output image
         with rasterio.open(image_path, 'w', **profile) as dst:
             for i in range(len(band_list)):
-                with rasterio.open(z.open(band_list[i])) as src:
+                with rasterio.open(c.get(band_list[i])) as src:
                         dst_array, dst_transform = rasterio.warp.reproject(
                             source=src.read(1),
                             src_transform=src.transform,
@@ -365,9 +329,9 @@ def s2_tile(zip_file, image_dir, meta_dir=None, incl_gt=False, used_bands=None, 
                         )
 
                         ### Recalculating baseline 4.0 images
-                        if proc_baseline >= 4:
-                            dst_array = np.add(dst_array, offsets[i])
-                            dst_array[dst_array < 0] = 0
+                        if offset_values and not ignore_pb:
+                            dst_array = np.add(dst_array, offset_values[i])
+                            dst_array[dst_array<0] = 0
 
                         dst.write(dst_array.astype(dtype), i+1)
 
@@ -385,7 +349,7 @@ def s2_tile(zip_file, image_dir, meta_dir=None, incl_gt=False, used_bands=None, 
 
     timer.stop(f"Created {output_name}.tif")
 
-def reproj_tile(input_paths, image_dir, meta_dir=None, ls_kwargs=None, s2_kwargs=None, recursive=False, mode=0):
+def reproj_tiles(input_paths, image_dir, meta_dir=None, ls_kwargs=None, s2_kwargs=None, recursive=False, mode=0):
     """Processes image archives. Handles Sentinel-2 and Landsat 4-9 images.
 
     Args:
@@ -403,9 +367,8 @@ def reproj_tile(input_paths, image_dir, meta_dir=None, ls_kwargs=None, s2_kwargs
     """
 
     file_list = load_files(input_paths, '*.*', recursive)
-
-    tar_list = fnmatch.filter(file_list, "*.tar.gz") + fnmatch.filter(file_list, "*.tar")
-    zip_list = fnmatch.filter(file_list, "*.zip")
+    tar_list = fnmatch.filter(file_list, '*.tar.gz') + fnmatch.filter(file_list, '*.tar')
+    zip_list = fnmatch.filter(file_list, '*.zip')
 
     ### Initializing process counting and timing
     print("\nProcessing tiles:")
@@ -416,12 +379,12 @@ def reproj_tile(input_paths, image_dir, meta_dir=None, ls_kwargs=None, s2_kwargs
 
     for i in tar_list:
         count += 1
-        print(f"\n{count}/{len_full}")
+        print(f"\n[{count}/{len_full}]")
         ls_tile(i, image_dir, meta_dir, mode=mode, **(ls_kwargs or {}))
 
     for i in zip_list:
         count += 1
-        print(f"\n{count}/{len_full}")
+        print(f"\n[{count}/{len_full}]")
         s2_tile(i, image_dir, meta_dir, mode=mode, **(s2_kwargs or {}))
 
     timer.stop()
@@ -458,8 +421,7 @@ def make_extras(input_paths, ovr=True, aux=True, recursive=False):
     subtimer.stop()
     timer.stop()
 
-
-def merge_datatake(input_paths, image_output_dir, meta_dir=None, meta_output_dir=None, ovr=True, aux=True, recursive=False, mode=0):
+def merge_datatakes(input_paths, image_output_dir, meta_dir=None, meta_output_dir=None, ovr=True, aux=True, recursive=False, mode=0):
     """Merges individual images by satellite, date and datatake.
 
     Args:
@@ -479,10 +441,12 @@ def merge_datatake(input_paths, image_output_dir, meta_dir=None, meta_output_dir
         None
     """
 
-    ### Checking paths
     check_path(image_output_dir, mode)
+    if meta_dir and meta_output_dir:
+        check_path(meta_output_dir, mode)
+    
+    ### Finding related images
     image_list = load_files(input_paths, '*.tif', recursive)
-
     pattern = re.compile(r".*(\d{8}_(?:L[45789]|s2[ab])(?:_T\d)?_(?:\d{3}|r\d{2,3}))_(?:\d{2}|\w{3})_([bt]oa_eov)(?:_\d{8}T\d{6})?.tif")
     matches = [pattern.fullmatch(str(i)) for i in image_list]
     affixes = {i.group(1, 2) for i in matches if i} ### Extracting groups 1 and 2 from the match object
@@ -495,12 +459,12 @@ def merge_datatake(input_paths, image_output_dir, meta_dir=None, meta_output_dir
     len_affixes = len(affixes)
     count = 0
 
-    ### Merging the individual images into a single datatake
+    ### Merging related images into a single datatake
     for a in affixes:
 
-        ### Creating path name
-        filter_ex = r".*" + a[0] + r"_(\d{2}|\w{3})_" + a[1] + r"(_\d{8}T\d{6})?.tif"
-        image_pattern = re.compile(filter_ex)
+        ### Assembling path name
+        filter_expression = r".*" + a[0] + r"_(\d{2}|\w{3})_" + a[1] + r"(_\d{8}T\d{6})?.tif"
+        image_pattern = re.compile(filter_expression)
         images = [i for i in image_list if image_pattern.fullmatch(str(i))]
         dst_name = f"{a[0]}_{a[1]}.tif"
         dst_path = Path(image_output_dir, dst_name)
@@ -508,88 +472,58 @@ def merge_datatake(input_paths, image_output_dir, meta_dir=None, meta_output_dir
         ### Process counting and timing
         count += 1
         subtimer.start(dst_name)
-        print(f"\n{count}/{len_affixes}")
+        print(f"\n[{count}/{len_affixes}]")
         print(f"Merging {dst_name}")
 
         ### Collecting metadata files
         if meta_dir and meta_output_dir:
             meta_dir = Path(meta_dir)
-            check_path(meta_output_dir, mode)
 
-            meta_pattern = re.compile(filter_ex[:-4])
-            meta_subdirs = [i for i in meta_dir.iterdir() if meta_pattern.fullmatch(str(i))] ### The filter expression without the '.tif'
+            meta_pattern = re.compile(filter_expression[:-4]+'.xml') ### The filter expression without the '.tif'
+            meta_files = [i for i in meta_dir.iterdir() if meta_pattern.fullmatch(str(i))]
             meta_output_path = Path(meta_output_dir, dst_name[:-4])
             check_path(meta_output_path, 1)
 
-            for m in meta_subdirs:
-                meta = next(m.iterdir()) ### Only copies the first file it finds
-                copy(meta, meta_output_path / meta.name)
+            for i in meta_files:
+                copy(i, meta_output_path / i.name)
 
-        ### Merging the images
-        opened_images = [rasterio.open(i) for i in images]
+        profile = GTIFF_UINT16(BIGTIFF='YES')
 
-        try:
-            sources = [i.tags()['source'] for i in opened_images] ### Storing the source image IDs
-        except:
-            sources = []
+        merge_images(images, dst_path, profile, 300, verbose=True)
 
-        try:
-            dst_desc = opened_images[0].descriptions
-        except:
-            dst_desc = []
-        
-        try:
-            dst_tags = {i: opened_images[0].tags()[i] for i in ['date', 'sat', 'path', 'refl']}
-        except:
-            dst_tags = {}
+        ### Attaching band names and metadata tags to the datatake
+        with rasterio.open(dst_path, 'r+') as dst:
+            tags = [get_tags(i) for i in images]
+            incomplete = False
 
-        bounds = list(zip(*[i.bounds for i in opened_images]))
-        bounding_box = box(min(bounds[0]), min(bounds[1]), max(bounds[2]), max(bounds[3]))
+            try:
+                dst.descriptions = get_desc(images[0])
+            except:
+                incomplete = True
 
-        dst_transform, dst_width, dst_height = calc_transform(bounding_box, opened_images[0].res[0])
+            try:
+                dst.update_tags(
+                    **{i: tags[0][i] for i in ['date', 'sat', 'path', 'refl']},
+                    comp_pred=profile['predictor'],
+                    comp_level=profile['zstd_level'],
+                )
+            except:
+                incomplete = True
 
-        profile = opened_images[0].profile
-        profile.update(
-            GTIFF_UINT16(
-                transform=dst_transform,
-                width=dst_width,
-                height=dst_height,
-                BIGTIFF='YES',
-            )
-        )
+            try:
+                dst.update_tags(sources=', '.join([i['source'] for i in tags]))
+            except:
+                incomplete = True
 
-        dst_tags.update(
-            comp_pred=profile['predictor'],
-            comp_level=profile['zstd_level']
-        )
+            if incomplete:
+                print("WARNING: Incomplete metadata.")
 
-        dst_count = opened_images[0].count
-        with rasterio.open(dst_path, 'w', **profile) as dst:
-
-            ### Merging images
-            for i in range(dst_count):
-                dst_array, dst_transform = merge(opened_images, indexes=[i+1])
-                ### https://rasterio.readthedocs.io/en/latest/api/rasterio.merge.html
-                dst_array = dst_array[0, :, :]
-                dst.write(dst_array, i+1)
-                del dst_array
-                print(f"Bands wirtten: {i+1}/{dst_count}", end='\r')
-            print()
-
-            ### Closing opened images
-            for i in opened_images:
-                i.close()
-
-            ### Attaching band names and metadata tags to the datatake
-            dst.descriptions = dst_desc
-            dst.update_tags(**dst_tags)
-            if len(sources) == len(images):
-                dst.update_tags(sources=', '.join(sources))
-
-        ### Making additional files
+        ### Creating external files
         if ovr:
+            print("Creating external overview")
             make_ovr(dst_path)
         if aux:
+            print("Creating statistics file")
             make_aux(dst_path)
 
         subtimer.stop()
@@ -621,8 +555,8 @@ def preproc(input_paths, image_output_dir, meta_output_dir=None, temp_dir=None, 
     timer.start("\nFull preprocessing")
 
     with TemporaryDirectory(dir=temp_dir) as tmp:
-        reproj_tile(input_paths, tmp, tmp, s2_kwargs={'incl_gt': True}, recursive=recursive, mode=mode)
-        merge_datatake(tmp, image_output_dir, tmp, meta_output_dir, mode=mode)
+        reproj_tiles(input_paths, tmp, tmp, s2_kwargs={'incl_gt': True}, recursive=recursive, mode=mode)
+        merge_datatakes(tmp, image_output_dir, tmp, meta_output_dir, mode=mode)
 
     timer.stop()
 
@@ -651,6 +585,7 @@ def reformat(input_paths, output_dir, compatible=False, suffix='', recursive=Fal
     check_path(output_dir, mode)
     image_list = load_files(input_paths, '*.tif', recursive)
 
+    ### Process counting and timing
     print("\nReformating images:")
     timer = ProcessTimer()
     subtimer = ProcessTimer()
@@ -664,7 +599,7 @@ def reformat(input_paths, output_dir, compatible=False, suffix='', recursive=Fal
     for i in image_list:
         dst_path = Path(output_dir, f"{i.stem}_{suffix}.tif")
         count += 1
-        print(f"{count}/{len_image_list}")
+        print(f"[{count}/{len_image_list}]")
         print(i.name)
         subtimer.start("Writing time")
 
