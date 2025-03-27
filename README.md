@@ -235,7 +235,8 @@ with FileContainer("example.zip") as c:
 A `timestamp` fügvénnyel kiírhatunk egy időbelyeget.
 
 ```python
-timestamp()
+ts = timestamp()
+print(ts)
 # 2024-05-22 08:40:11
 ```
 
@@ -479,6 +480,22 @@ print(masked_array)
 #  [3 0]]
 ```
 
+## Kivágás
+
+Kivághatunk egy raszteres képet egy vektoros állomány poligonjaival a `cut_images` függvény segítségével.
+
+```python
+cut_image(
+    "example.tif",
+    "cut.shp",
+    "output_dir",
+    field='id', ### Az oszlop, amiben a `value` értékeit keressük
+    values=[1, 10, 13], ### Ezeket az értékeket keresi a `field` oszlopban
+)
+```
+
+A`resolution` és `grid` argokkal a kimeneti kép felbontását és az extent kerekítéshez használt rács felbontását állíthatjuk be. A `default_crs` arg mondja meg a használt vetületet, ha azt a használt állományok nem tartalmazzák, ez alapból EOV. A `sort` arggal értékek szerint mappákba rendezhetjük a kivágott képeket.
+
 ## Sávok kinyerése és indexek előállítása
 
 Kinyerhetünk bizonyos sávokat egy képből az `extract_bands` fügvénnyel. Ezek a sávok külön egysávos képként jelennek meg a kimeneti mappában.
@@ -630,7 +647,7 @@ preproc("input_dir", "output_dir", meta_output_dir="meta_dir")
 
 Ha az archívumokból képeket szeretnénk csinálni mozaikolás nélkül, használjuk a `reproj_tile` függvényt.
 
-Az `ls_kwargs` és `s2_kwargs` argok segítésgével argokat továbbíthatunk a Landsat és Sentinel-2 feldolgozásoknak. A `dtype` és `used_bands` argokkal meghatározhatjuk az adattípust és, hogy melyik sávokat szeretnénk látni a feldolgozott képben. Az `incl_gt` arg Sentinel-2 felvételeknél a generálás időpontját a név mögé rakja.
+Az `ls_kwargs` és `s2_kwargs` argok segítésgével argokat továbbíthatunk a Landsat és Sentinel-2 feldolgozásoknak. A `dtype` és `used_bands` argokkal meghatározhatjuk az adattípust és, hogy melyik sávokat szeretnénk látni a feldolgozott képben. Az `crs` és `suffix` argok a vetületet és a kimeneti fájl nevének utolsó tagját határozza meg. Az `incl_gt` arg Sentinel-2 felvételeknél a generálás időpontját a név mögé rakja.
 
 A felvételek feldolgozásánál használható sávok a `L47_BANDS`, `L89_BANDS` és `S2_BANDS` változókban érhetők el.
 
@@ -661,6 +678,8 @@ reproj_tile(s2_zip, "output_dir", s2_kwargs={'incl_gt': True})
 ### Eredmény: output_dir/20220102_s2a_r079_tcr_boa_eov_20220102T114458.tif
 ```
 
+Ha egy feldolgozott tile-ból hiányoznak sávok, akkor automatikusan figyelmeztet és kitörli a képet.
+
 ### Feldolgozott tile-ok mozaikolása
 
 Ha már meglévő képeket szeretnénk mozaikolni, használjuk a `merge_datatake` függvényt. Fonotos, hogy ez csak a `reproj_tile`-al készült képeken tud dolgozni.
@@ -679,7 +698,7 @@ reformat("example.tif", "output_dir", compatible=False, suffix='')
 ### Eredmény: output_dir/example.tif
 ```
 
-A `make_extras` függvény egyesíti a `make_ovr` és `make_aux` fájlok funkcionalitását.
+A `gistools` modul `make_ovr` és `make_aux` fügvényekkel.
 
 ```python
 make_extras(input_paths, ovr=True, aux=True, recursive=False)

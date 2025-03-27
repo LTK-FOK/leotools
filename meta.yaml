@@ -2,7 +2,7 @@
 {% set data = pyproject['project'] %}
 {% set name = data['name'] %}
 {% set python = data['requires-python'] %}
-{% set version = '0.8.0' %}
+{% set version = '0.9.0' %}
 
 package:
   name: {{ name }}
@@ -12,7 +12,7 @@ source:
   path: .
 
 build:
-  string: py38gdal30_1
+  string: gdal39_c
   script: python setup.py install --single-version-externally-managed --record=record.txt
   include_recipe: False
   entry_points:

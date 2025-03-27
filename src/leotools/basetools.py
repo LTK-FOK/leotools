@@ -10,10 +10,21 @@ import tarfile
 ### Basic stuff
 
 def timestamp():
-    """Prints a timestamp."""
+    """Returns the timestamp as a string."""
     time_format = '%Y-%m-%d %H:%M:%S'
     ts = time.strftime(time_format, time.localtime(time.time()))
-    print(ts)
+    return ts
+
+def format_time(a):
+    """Formats time durations given in milliseconds."""
+    int_time = int(a)
+    
+    days =  '' if a < 86400 else f"{int_time // 86400}d "
+    hours = '' if a < 3600 else f"{(int_time % 86400) // 3600}h "
+    mins = '' if a < 60 else f"{(int_time % 3600) // 60}m "
+    secs = f"{a % 60:.2f}s"
+
+    return f"{days}{hours}{mins}{secs}"
 
 class ProcessTimer:
     """A class for measuring process runtimes.
@@ -24,6 +35,7 @@ class ProcessTimer:
         verbose (bool, optional): If True (default), prints the process time
             when stopped.
     """
+
     def __init__(self, verbose=True):
         self.proc_name = None
         self.verbose = verbose
@@ -56,14 +68,7 @@ class ProcessTimer:
                 self.proc_name = proc_name
 
             proc_time = (time.time()-self.start_time if self.start_time else 0) + self.add_time
-            int_proc_time = int(proc_time)
-            
-            days =  '' if proc_time < 86400 else f"{int_proc_time // 86400}d "
-            hours = '' if proc_time < 3600 else f"{(int_proc_time % 86400) // 3600}h "
-            mins = '' if proc_time < 60 else f"{(int_proc_time % 3600) // 60}m "
-            secs = f"{proc_time % 60:.2f}s"
-
-            return_value = f"{self.proc_name+': ' if self.proc_name else ''}{days}{hours}{mins}{secs}"
+            return_value = f"{self.proc_name+': ' if self.proc_name else ''}{format_time(proc_time)}"
             self.start_time = None
             self.proc_name = None
 
@@ -243,6 +248,7 @@ class FileContainer:
         cont_type (str, optional): Type of the container (dir, zip or tar).
             Attempts to detect it if not provided.
     """
+    
     def __init__(self, cont_path, cont_type=None):
 
         cont_path = Path(cont_path)

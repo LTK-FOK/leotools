@@ -2,6 +2,7 @@
 
 from pathlib import Path
 from math import ceil
+import warnings
 
 import numpy as np
 from osgeo import gdal
@@ -13,7 +14,10 @@ from rasterio.warp import aligned_target, reproject
 import geopandas as gpd
 from shapely.geometry import Polygon, box
 
+from.constants import EOV
 from .basetools import check_path, load_files, ProcessTimer
+
+gdal.UseExceptions()
 
 ### Metadata manipulation
 
@@ -95,6 +99,15 @@ def set_nodata(image, nodata):
     """Sets the nodata value of an image to the specified number."""
     with rasterio.open(image, 'r+') as src:
         src.nodata = nodata
+
+def validate_image(image, nodata=0):
+    """Returns False if any band of the image is empty."""
+    with rasterio.open(image) as src:
+        for i in range(src.count):
+            array = src.read(i+1)
+            if (array == nodata).sum() == array.size:
+                return False
+    return True
 
 ### Importing and exporting arrays
 
@@ -278,7 +291,7 @@ def ndiff(e1, e2):
     """Normalized difference function. Returns x, where x = (e1-e2) / (e1+e2)."""
     return (e1-e2) / (e1+e2)
 
-def extract_bands(image, output_dir, bands=None, dtype=None, mode=0):
+def extract_bands(image, output_dir, bands=None, dtype=None, sort=False, mode=0):
     """Extract bands or band combinations of an image.
 
     Args:
@@ -288,6 +301,8 @@ def extract_bands(image, output_dir, bands=None, dtype=None, mode=0):
             output.
         dtype (str, optional): The datatype of the output images. Defaults to
             the datatype of the input.
+        sort (bool, optional): Wether to put the output images into separate
+            directories based on band.
         mode (int, optional): Mode used for checking the output paths. Based on
             the `check_path` function.
 
@@ -313,7 +328,13 @@ def extract_bands(image, output_dir, bands=None, dtype=None, mode=0):
         ### If bands are given as a list
         if isinstance(bands, list):
             for i in bands:
-                out_path = output_dir / f"{image.stem}_b{i}.tif"
+                out_name = f"{image.stem}_b{i}.tif"
+                if sort:
+                    check_path(output_dir/f"b{i}", 1)
+                    out_path = output_dir/f"b{i}"/out_name
+                else:
+                    out_path = output_dir/out_name
+                # out_path = output_dir / f"{image.stem}_b{i}.tif"
                 array = b[i].astype(profile['dtype'])
                 array_to_image(array, out_path, profile=profile)
 
@@ -330,7 +351,12 @@ def extract_bands(image, output_dir, bands=None, dtype=None, mode=0):
                     array[np.isnan(array)] = profile['nodata'] or 0
             
                 ### Exporting the array
-                out_path = output_dir / f"{image.stem}_{k}.tif"
+                out_name = f"{image.stem}_{k}.tif"
+                if sort:
+                    check_path(output_dir/k, 1)
+                    out_path = output_dir/k/out_name
+                else:
+                    out_path = output_dir/out_name
                 array_to_image(array, out_path, profile=profile)
 
         else:
@@ -443,7 +469,6 @@ def merge_images(input_paths, output, profile=None, round=0, recursive=False, mo
             dst_array, dst_transform = merge(opened_images, indexes=[i+1])
             dst_array = dst_array[0, :, :]
             dst.write(dst_array, i+1)
-            del dst_array
 
             if verbose:
                 print(f"Bands wirtten: {i+1}/{count}", end='\r')
@@ -454,6 +479,11 @@ def merge_images(input_paths, output, profile=None, round=0, recursive=False, mo
         ### Closing opened images
         for i in opened_images:
             i.close()
+
+    ### Checking for missing bands in output
+    if not validate_image(output):
+        print(f"WARNING: Image is missing one or more bands. Deleting...")
+        output.unlink()
 
 ### Making external files
 
@@ -486,12 +516,11 @@ def make_ovr(image, levels=(2, 8, 32, 128), compress='zstd', compress_level=None
 def make_aux(image):
     """Calculates image statistics and puts them into an .aux.xml file."""
 
-    Path(image).with_suffix('.tif.aux.xml').unlink(missing_ok=True)
+    Path(image).with_suffix('.tif.aux.xml').unlink(missing_ok=True) ### Delete previous iteration
+    
     src = gdal.Open(str(image))
-
     for i in range(src.RasterCount):
         src.GetRasterBand(i + 1).ComputeStatistics(0)
-
     src = None
 
 ### Vector operations
@@ -569,15 +598,89 @@ def multi_mask(image, output, nodata=0, area_masks=None, bound_masks=None, all_t
     with rasterio.open(output, 'w', **profile) as dst:
         dst.write(out_img)
 
+def cut_image(image, cut_vector, output_dir, field, values, grid=0, resolution=None, default_crs=EOV, sort=False,
+    mode=0):
+    """Cuts raster image with polygons of provided vector.
+    
+    Args:
+        image (path): The image to cut up.
+        cut_vector (path): The vector that contains the polygons to cut by.
+        output_dir (path): The directory to put the output images into.
+        field (str, optional): The field to focus on.
+        values (list or dict, optional): The values to match when chosing
+            polygons.
+        grid (number, optional): The grid to round to.
+        resolution (number, optional): Destination resolution in meters.
+        default_crs (str, optional): Coordinate reference system used if image
+            or vector doesn't include it.
+        sort (bool, optional): Wether to put the output images into separate
+            directories based on value.
+        mode (int, optional): Mode used for checking the output paths. Based on
+            the `check_path` function.
+    """
+    
+    check_path(output_dir, mode)
+    output_dir = Path(output_dir)
+    image = Path(image)
+
+    gdf = gpd.read_file(cut_vector)
+    vec_crs = gdf.crs or default_crs
+    
+    with rasterio.open(image) as src:
+        src_bounds = box(*src.bounds)
+        crs = src.crs or default_crs
+        if not resolution:
+            resolution = src.res[0]
+
+    ### If values are given as a dictionary
+    if isinstance(values, dict):
+        values = values.items()
+    else:
+        values = [(i, i) for i in values]
+    
+    for i in values:
+        suffix = i[0]
+        geom = gdf[gdf[field] == i[1]].iloc[0]['geometry'] ### Get geometry of first feature that matches value
+
+        if src_bounds.intersects(geom):
+            out_name = f"{image.stem}_{suffix}.tif"
+            if sort:
+                check_path(output_dir/suffix, 1)
+                out_path = output_dir/suffix/out_name
+            else:
+                out_path = output_dir/out_name
+
+            options = gdal.WarpOptions(
+                cutlineWKT=geom,
+                multithread=True,
+                outputBounds=round_extent(geom.bounds, grid),
+                format='GTiff',
+                xRes=resolution,
+                yRes=resolution,
+                resampleAlg='near',
+                targetAlignedPixels=True,
+                srcSRS=crs,
+                dstSRS=crs,
+                cutlineSRS=vec_crs,
+                copyMetadata=True,
+            )
+
+            gdal.Warp(out_path, image, options=options)
+            if not validate_image(out_path):
+                out_path.unlink()
+
 ### Coordinate operations
 
 def round_to(x, y):
     """Rounds x to the closest multiple of y.
     
-    A positive/negative y rounds up/down respectively.
+    A positive/negative y rounds up/down respectively. A y of 0 returns x.
     """
 
-    return (ceil(x / y)) * y
+    if y==0:
+        return x
+    else:
+        return (ceil(x / y)) * y
 
 def round_extent(bounds, grid):
     """Rounds extent bounds to the grid.

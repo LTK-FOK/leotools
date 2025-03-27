@@ -19,7 +19,6 @@ class GTIFF_UINT16(Profile):
         'predictor': 2,
         'dtype': 'uint16',
         'nodata': 0,
-        'crs': EOV,
     }
 
 class GTIFF_UINT16_COMPATIBLE(Profile):
@@ -36,7 +35,6 @@ class GTIFF_UINT16_COMPATIBLE(Profile):
         'predictor': 2,
         'dtype': 'uint16',
         'nodata': 0,
-        'crs': EOV,
     }
 
 NDXI_L8 = {

@@ -16,7 +16,7 @@ from shapely.geometry import Polygon, box
 
 from .constants import EOV, GTIFF_UINT16, GTIFF_UINT16_COMPATIBLE
 from .basetools import ProcessTimer, check_path, load_files, FileContainer
-from .gistools import calc_transform, image_to_array, make_aux, make_ovr, get_tags, get_desc, merge_images
+from .gistools import calc_transform, image_to_array, make_aux, make_ovr, get_tags, get_desc, merge_images, validate_image
 
 ### Constants
 L47_BANDS = { ### number: name
@@ -70,7 +70,13 @@ S2_BANDS = { ### number: (resolution, name)
     ### TCI band not implemented
 }
 
-def ls_tile(input_file, image_dir, meta_dir=None, used_bands=None, dtype='uint16', mode=0):
+def suff_format(a):
+    if a:
+        return f"_{a}"
+    else:
+        return(a)
+
+def ls_tile(input_file, image_dir, meta_dir=None, used_bands=None, dtype='uint16', crs=EOV, suffix='eov', mode=0):
     """Exports a GeoTIFF and a metadata from a Landsat 4-9 archive.
 
     Args:
@@ -80,7 +86,10 @@ def ls_tile(input_file, image_dir, meta_dir=None, used_bands=None, dtype='uint16
             in a subdirectory with the same name as the image.
         used_bands (list, optional): Bands included in the final image. Bands
             are not duplicated, only the first mention is used.
-        dtype (str): Data type of the output image.
+        dtype (str, optional): Data type of the output image.
+        crs (str, optional): Coordinate reference system of output in
+            'EPSG:12345' format.
+        suffix (str, optional): The last element of the output name.
         mode (int, optional): Mode used for checking the output paths. Based on
             the `check_path` function.
 
@@ -119,7 +128,7 @@ def ls_tile(input_file, image_dir, meta_dir=None, used_bands=None, dtype='uint16
         row = root.find("IMAGE_ATTRIBUTES/WRS_ROW").text
         refl = 'boa' if root.find("PRODUCT_CONTENTS/PROCESSING_LEVEL").text == 'L2SP' else 'toa'
 
-        output_name = f"{date}_{sat}_{tier}_{path}_{row}_{refl}_eov"
+        output_name = f"{date}_{sat}_{tier}_{path}_{row}_{refl}{suff_format(suffix)}"
         image_path = Path(image_dir, output_name + ".tif")
 
         ### Getting the ID of the source image
@@ -154,10 +163,8 @@ def ls_tile(input_file, image_dir, meta_dir=None, used_bands=None, dtype='uint16
     ])
 
     utm = f"EPSG:{32600 + int(root.find('PROJECTION_ATTRIBUTES/UTM_ZONE').text)}"
-
     src_transform = rasterio.transform.from_bounds(*(bounding_box.bounds), width=src_shape[2], height=src_shape[1])
-
-    dst_transform, dst_width, dst_height = calc_transform(bounding_box, resolution, utm, EOV, 300)
+    dst_transform, dst_width, dst_height = calc_transform(bounding_box, resolution, utm, crs, 300)
 
     dst_array, dst_transform = rasterio.warp.reproject(
         source=src_array,
@@ -167,7 +174,7 @@ def ls_tile(input_file, image_dir, meta_dir=None, used_bands=None, dtype='uint16
 
         destination=np.zeros((src_shape[0], dst_height, dst_width), dtype),
         dst_transform=dst_transform,
-        dst_crs=EOV,
+        dst_crs=crs,
         dst_nodata=dst_nodata,
         dst_resolution=(resolution, resolution),
 
@@ -183,6 +190,7 @@ def ls_tile(input_file, image_dir, meta_dir=None, used_bands=None, dtype='uint16
         count=src_shape[0],
         transform=dst_transform,
         nodata=dst_nodata,
+        crs=crs,
     )
 
     ### Writing output image
@@ -198,10 +206,16 @@ def ls_tile(input_file, image_dir, meta_dir=None, used_bands=None, dtype='uint16
             comp_pred=profile['predictor'],
             comp_level=profile['zstd_level']
         )
+    
+    ### Checking for missing bands in output
+    if not validate_image(image_path):
+        print(f"WARNING: Image is missing one or more bands. Deleting...")
+        image_path.unlink()
 
     timer.stop(f"Created {output_name}.tif")
 
-def s2_tile(input_file, image_dir, meta_dir=None, used_bands=None, dtype='uint16', mode=0, incl_gt=False, ignore_pb=False):
+def s2_tile(input_file, image_dir, meta_dir=None, used_bands=None, dtype='uint16', crs=EOV, suffix='eov', mode=0,
+    incl_gt=False, ignore_pb=False):
     """Exports a GeoTIFF and a metadata from a Sentinel-2 archive.
 
     Args:
@@ -211,13 +225,16 @@ def s2_tile(input_file, image_dir, meta_dir=None, used_bands=None, dtype='uint16
             in a subdirectory with the same name as the image.
         used_bands (list, optional): Bands included in the final image. Bands
             are not duplicated, only the first mention is used.
-        dtype (str): Data type of the output image.
+        dtype (str, optional): Data type of the output image.
+        crs (str, optional): Coordinate reference system of output in
+            'EPSG:12345' format.
+        suffix (str, optional): The last element of the output name.
         mode (int, optional): Mode used for checking the output paths. Based on
             the `check_path` function.
         incl_gt (bool, optional): If true, the image's name will include
             generation time.
-        ignore_pb (bool): Ignore the processing baseline of the image and the
-            associated calculations.
+        ignore_pb (bool, optional): Ignore the processing baseline of the image
+            and the associated calculations.
 
     Returns:
         None
@@ -246,9 +263,10 @@ def s2_tile(input_file, image_dir, meta_dir=None, used_bands=None, dtype='uint16
 
     ### Handling the zip file
     with FileContainer(input_file) as c:
+
+        ### Loading in metadata
         meta_name = c.filter("*MTD_MSI???.xml")[0]
         root = ET.parse(c.get(meta_name)).getroot()
-        
         namespace = '{' + root.attrib['{http://www.w3.org/2001/XMLSchema-instance}schemaLocation'] + '}General_Info'
         general_info = ET.parse(c.get(meta_name)).getroot().find(namespace)
         product_info = [i for i in general_info if i.tag.endswith('Product_Info')][0]
@@ -262,7 +280,7 @@ def s2_tile(input_file, image_dir, meta_dir=None, used_bands=None, dtype='uint16
         refl = 'boa' if product_info.find('PROCESSING_LEVEL').text.startswith('Level-2A') else 'toa'
         gen_time = product_uri[44:-5] if incl_gt else '' ### This includes underscore
 
-        output_name = f"{date}_{sat}_{orbit}_{tile}_{refl}_eov{gen_time}"
+        output_name = f"{date}_{sat}_{orbit}_{tile}_{refl}{suff_format(suffix)}{gen_time}"
         image_path = Path(image_dir, output_name + ".tif")
 
         ### Getting the ID of the source image
@@ -295,7 +313,7 @@ def s2_tile(input_file, image_dir, meta_dir=None, used_bands=None, dtype='uint16
             bounding_box = box(*(src.bounds))
             utm = src.crs
 
-        dst_transform, dst_width, dst_height = calc_transform(bounding_box, resolution, utm, EOV, 300)
+        dst_transform, dst_width, dst_height = calc_transform(bounding_box, resolution, utm, crs, 300)
 
         profile = GTIFF_UINT16(
             dtype=dtype,
@@ -305,6 +323,7 @@ def s2_tile(input_file, image_dir, meta_dir=None, used_bands=None, dtype='uint16
             transform=dst_transform,
             nodata=dst_nodata,
             BIGTIFF='YES',
+            crs=crs
         )
 
         ### Writing output image
@@ -319,7 +338,7 @@ def s2_tile(input_file, image_dir, meta_dir=None, used_bands=None, dtype='uint16
 
                             destination=np.zeros((dst_height, dst_width), dtype),
                             dst_transform=dst_transform,
-                            dst_crs=EOV,
+                            dst_crs=crs,
                             dst_nodata=dst_nodata,
                             dst_resolution=(resolution, resolution),
 
@@ -346,16 +365,24 @@ def s2_tile(input_file, image_dir, meta_dir=None, used_bands=None, dtype='uint16
                 comp_pred=profile['predictor'],
                 comp_level=profile['zstd_level']
             )
+        
+        ### Checking for missing bands in output
+        if not validate_image(image_path):
+            print(f"WARNING: Image is missing one or more bands. Deleting...")
+            image_path.unlink()
 
     timer.stop(f"Created {output_name}.tif")
 
-def reproj_tiles(input_paths, image_dir, meta_dir=None, ls_kwargs=None, s2_kwargs=None, recursive=False, mode=0):
+def reproj_tiles(input_paths, image_dir, meta_dir=None, crs=EOV, suffix='eov', ls_kwargs=None, s2_kwargs=None, recursive=False, mode=0):
     """Processes image archives. Handles Sentinel-2 and Landsat 4-9 images.
 
     Args:
         input_paths (path or list): Archive or a list or direcotry of archives.
         image_dir (path): Output directory for GeoTIFF images.
         meta_dir (path, optional): Output directory for metadata files.
+        crs (str, optional): Coordinate reference system of output in
+            'EPSG:12345' format.
+        suffix (str, optional): The last element of the output name.
         ls_kwargs (dict, optional): Keyword args used for Landsat processing.
         s2_kwargs (dict, optional): Keyword args used for Sentinel-2 processing.
         recursive (bool, optional): Whether to scan the input paths recursively.
@@ -371,57 +398,26 @@ def reproj_tiles(input_paths, image_dir, meta_dir=None, ls_kwargs=None, s2_kwarg
     zip_list = fnmatch.filter(file_list, '*.zip')
 
     ### Initializing process counting and timing
-    print("\nProcessing tiles:")
+    print("\nPROCESSING TILES:")
     timer = ProcessTimer()
-    timer.start("\nTiles processed")
+    timer.start("\nTILES PROCESSED")
     len_full = len(tar_list + zip_list)
     count = 0
 
     for i in tar_list:
         count += 1
         print(f"\n[{count}/{len_full}]")
-        ls_tile(i, image_dir, meta_dir, mode=mode, **(ls_kwargs or {}))
+        ls_tile(i, image_dir, meta_dir, mode=mode, crs=crs, suffix=suffix, **(ls_kwargs or {}))
 
     for i in zip_list:
         count += 1
         print(f"\n[{count}/{len_full}]")
-        s2_tile(i, image_dir, meta_dir, mode=mode, **(s2_kwargs or {}))
+        s2_tile(i, image_dir, meta_dir, mode=mode, crs=crs, suffix=suffix, **(s2_kwargs or {}))
 
     timer.stop()
 
-def make_extras(input_paths, ovr=True, aux=True, recursive=False):
-    """Creates external overview and statistics files to images.
-
-    Args:
-        input_paths (path or list): Images to work on.
-        ovr (bool, optional): Whether to create external overviews.
-        aux (bool, optional): Whether to create external statistics files.
-        recursive (bool, optional): Whether to scan the input paths recursively.
-
-    Returns:
-        None
-    """
-
-    image_list = load_files(input_paths, '*.tif', recursive)
-
-    print("\nMaking external files:")
-    timer = ProcessTimer()
-    subtimer = ProcessTimer()
-    timer.start("\nExternal files made")
-
-    if ovr or aux:
-        for i in image_list:
-            print(f"\nProcessing {i.name}")
-            subtimer.start(f"Extras made")
-            if ovr:
-                make_ovr(i)
-            if aux:
-                make_aux(i)
-
-    subtimer.stop()
-    timer.stop()
-
-def merge_datatakes(input_paths, image_output_dir, meta_dir=None, meta_output_dir=None, ovr=True, aux=True, recursive=False, mode=0):
+def merge_datatakes(input_paths, image_output_dir, meta_dir=None, meta_output_dir=None, crs=EOV, suffix='eov', ovr=True, aux=True,
+    recursive=False, mode=0):
     """Merges individual images by satellite, date and datatake.
 
     Args:
@@ -431,6 +427,9 @@ def merge_datatakes(input_paths, image_output_dir, meta_dir=None, meta_output_di
             subdirectories matching image names.
         meta_output_dir (path, optional): Output directory for collected
             metadata files.
+        crs (str, optional): Coordinate reference system of output in
+            'EPSG:12345' format.
+        suffix (str, optional): The last element of the output name.
         ovr (bool, optional): Whether to create external overviews.
         aux (bool, optional): Whether to create external statistics files.
         recursive (bool, optional): Whether to scan the input paths recursively.
@@ -447,15 +446,19 @@ def merge_datatakes(input_paths, image_output_dir, meta_dir=None, meta_output_di
     
     ### Finding related images
     image_list = load_files(input_paths, '*.tif', recursive)
-    pattern = re.compile(r".*(\d{8}_(?:L[45789]|s2[ab])(?:_T\d)?_(?:\d{3}|r\d{2,3}))_(?:\d{2}|\w{3})_([bt]oa_eov)(?:_\d{8}T\d{6})?.tif")
+    pattern = re.compile(
+        r".*(\d{8}_(?:L[45789]|s2\w)(?:_T\d)?_(?:\d{3}|r\d{2,3}))_(?:\d{2}|\w{3})_([bt]oa"
+        + suff_format(suffix)
+        + r")(?:_\d{8}T\d{6})?.tif"
+    )
     matches = [pattern.fullmatch(str(i)) for i in image_list]
     affixes = {i.group(1, 2) for i in matches if i} ### Extracting groups 1 and 2 from the match object
 
     ### Initializing process counting and timing
-    print("\nMerging Datatakes:")
+    print("\nMERGING DATATAKES:")
     timer = ProcessTimer()
     subtimer = ProcessTimer()
-    timer.start("\nDatatakes merged")
+    timer.start("\nDATATAKES MERGED")
     len_affixes = len(affixes)
     count = 0
 
@@ -471,7 +474,7 @@ def merge_datatakes(input_paths, image_output_dir, meta_dir=None, meta_output_di
 
         ### Process counting and timing
         count += 1
-        subtimer.start(dst_name)
+        subtimer.start(f"{dst_name} merged")
         print(f"\n[{count}/{len_affixes}]")
         print(f"Merging {dst_name}")
 
@@ -489,48 +492,50 @@ def merge_datatakes(input_paths, image_output_dir, meta_dir=None, meta_output_di
 
         profile = GTIFF_UINT16(BIGTIFF='YES')
 
-        merge_images(images, dst_path, profile, 300, verbose=True)
+        merge_images(images, dst_path, profile, 300, verbose=True) #! ha nincs meg minden sáv, kitörli, utána nem tud beleírni
 
-        ### Attaching band names and metadata tags to the datatake
-        with rasterio.open(dst_path, 'r+') as dst:
-            tags = [get_tags(i) for i in images]
-            incomplete = False
+        if dst_path.exists(): ### If it didn't get deleted because of missing bands
+        
+            ### Attaching band names and metadata tags to the datatake
+            with rasterio.open(dst_path, 'r+') as dst:
+                tags = [get_tags(i) for i in images]
+                incomplete = False
 
-            try:
-                dst.descriptions = get_desc(images[0])
-            except:
-                incomplete = True
+                try:
+                    dst.descriptions = get_desc(images[0])
+                except:
+                    incomplete = True
 
-            try:
-                dst.update_tags(
-                    **{i: tags[0][i] for i in ['date', 'sat', 'path', 'refl']},
-                    comp_pred=profile['predictor'],
-                    comp_level=profile['zstd_level'],
-                )
-            except:
-                incomplete = True
+                try:
+                    dst.update_tags(
+                        **{i: tags[0][i] for i in ['date', 'sat', 'path', 'refl']},
+                        comp_pred=profile['predictor'],
+                        comp_level=profile['zstd_level'],
+                    )
+                except:
+                    incomplete = True
 
-            try:
-                dst.update_tags(sources=', '.join([i['source'] for i in tags]))
-            except:
-                incomplete = True
+                try:
+                    dst.update_tags(sources=', '.join([i['source'] for i in tags]))
+                except:
+                    incomplete = True
 
-            if incomplete:
-                print("WARNING: Incomplete metadata.")
+                if incomplete:
+                    print("WARNING: Incomplete metadata.")
 
-        ### Creating external files
-        if ovr:
-            print("Creating external overview")
-            make_ovr(dst_path)
-        if aux:
-            print("Creating statistics file")
-            make_aux(dst_path)
+            ### Creating external files
+            if ovr:
+                print("Creating external overview")
+                make_ovr(dst_path)
+            if aux:
+                print("Creating statistics file")
+                make_aux(dst_path)
 
         subtimer.stop()
 
     timer.stop()
 
-def preproc(input_paths, image_output_dir, meta_output_dir=None, temp_dir=None, recursive=False, mode=0):
+def preproc(input_paths, image_output_dir, meta_output_dir=None, temp_dir=None, crs=EOV, suffix='eov', recursive=False, mode=0):
     """Handles the full preprocessing of Landsat 4-9 and Sentinel 2 archives.
 
     It first creates tiled GeoTIFF images and metadata files in a temp
@@ -543,6 +548,9 @@ def preproc(input_paths, image_output_dir, meta_output_dir=None, temp_dir=None, 
         meta_output_dir (path, optional): Output directory for collected
             metadata files.
         temp_dir (path, optional): The specific directory for temporary files.
+        crs (str, optional): Coordinate reference system of output in
+            'EPSG:12345' format.
+        suffix (str, optional): The last element of the output name.
         recursive (bool, optional): Whether to scan the input paths recursively.
         mode (int, optional): Mode used for checking the temp and output paths.
             Based on the `check_path` function.
@@ -552,15 +560,15 @@ def preproc(input_paths, image_output_dir, meta_output_dir=None, temp_dir=None, 
     """
 
     timer = ProcessTimer()
-    timer.start("\nFull preprocessing")
+    timer.start("\nFULL PREPROCESSING")
 
     with TemporaryDirectory(dir=temp_dir) as tmp:
-        reproj_tiles(input_paths, tmp, tmp, s2_kwargs={'incl_gt': True}, recursive=recursive, mode=mode)
-        merge_datatakes(tmp, image_output_dir, tmp, meta_output_dir, mode=mode)
+        reproj_tiles(input_paths, tmp, tmp, crs=crs, suffix=suffix, s2_kwargs={'incl_gt': True}, recursive=recursive, mode=mode)
+        merge_datatakes(tmp, image_output_dir, tmp, meta_output_dir, crs=crs, suffix=suffix, mode=mode)
 
     timer.stop()
 
-def reformat(input_paths, output_dir, compatible=False, suffix='', recursive=False, mode=0):
+def reformat(input_paths, output_dir, compatible=False, suffix='', ovr=False, aux=False, recursive=False, mode=0):
     """Reformats images based on the current format standards.
 
     To avoid any unintended consequences, make sure that the input files and
@@ -574,6 +582,8 @@ def reformat(input_paths, output_dir, compatible=False, suffix='', recursive=Fal
         compatible (bool, otpional): Whether to use a compatible format or the
             most recent one.
         suffix (str, optional): A suffix to append to filenames.
+        ovr (bool, optional): Whether to create external overviews.
+        aux (bool, optional): Whether to create external statistics files.
         recursive (bool, optional): Whether to scan the input paths recursively.
         mode (int, optional): Mode used for checking the temp and output paths.
             Based on the `check_path` function.
@@ -586,10 +596,10 @@ def reformat(input_paths, output_dir, compatible=False, suffix='', recursive=Fal
     image_list = load_files(input_paths, '*.tif', recursive)
 
     ### Process counting and timing
-    print("\nReformating images:")
+    print("\nREFORMATING IMAGES:")
     timer = ProcessTimer()
     subtimer = ProcessTimer()
-    timer.start("\nImages reformated")
+    timer.start("\nIMAGES REFORMATED")
     len_image_list = len(image_list)
     count = 0
 
@@ -597,11 +607,11 @@ def reformat(input_paths, output_dir, compatible=False, suffix='', recursive=Fal
     levels = ['zstd_level', 'zlevel']
 
     for i in image_list:
-        dst_path = Path(output_dir, f"{i.stem}_{suffix}.tif")
+        dst_path = Path(output_dir, f"{i.stem}{suff_format(suffix)}.tif")
         count += 1
-        print(f"[{count}/{len_image_list}]")
+        print(f"\n[{count}/{len_image_list}]")
         print(i.name)
-        subtimer.start("Writing time")
+        subtimer.start("Done")
 
         with rasterio.open(i) as src:
             profile = src.profile
@@ -617,6 +627,12 @@ def reformat(input_paths, output_dir, compatible=False, suffix='', recursive=Fal
                     comp_pred=profile['predictor'],
                     comp_level=profile[levels[compatible]]
                 )
+
+        ### Making external overview and statistics
+        if ovr:
+            make_ovr(dst_path)
+        if aux:
+            make_aux(dst_path)
 
         subtimer.stop()
 

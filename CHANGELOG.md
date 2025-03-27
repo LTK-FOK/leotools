@@ -1,6 +1,33 @@
+# v0.9.0
+
+## Added
+
+- `basetools.format_time` function.
+- `gistools.validate_image` function.
+- `gistools.cut_image` function.
+- `crs` and `suffix` args to core preprocessing functions.
+- `sort` arg to `gistools.extract_bands` function.
+- `ovr` and `aux` arg to `preproc.reformat` function.
+- - Image procession now validates the bands of the output image.
+
+## Changed
+
+- `basetools.timestamp` now returns its value instead of printing it.
+
+## Removed
+
+- `crs` key from `constants.GTIFF_UINT16` and `constants.GTIFF_UINT16_COMPATIBLE`.
+- `preproc.make_extras` function.
+
+## Fixed
+
+- Sentinel-2 processing can now deal with S2C images.
+- `gistools.round_to` now accepts 0 as `y` arg.
+
 # v0.8.0
 
 ## Added
+
 - `basetools.timestamp` function.
 - `gistools.get_desc` function.
 - `gistools.merge_images` function. It has also been added as a command line function.
@@ -9,10 +36,11 @@
 - Path checking for outputs and the `mode` arg to `array_to_image`, `extract_bands`, `stack_images`, `merge_images` and `multi_mask` functions in the `gistools` submodule.
 - `dst_crs` arg to `gistools.calc_transform` function.
 - `verbose` arg to `gistools.stack_images` function.
-- `dtype` arg to `preproc.ls_tile`, `dtype` and `ignore_pb` args to `preproc.s2_tile`.
+- `dtype` arg to `preproc.ls_tile`. `dtype` and `ignore_pb` args to `preproc.s2_tile`.
 - QA_PIXEL, QA_RADSAT, QA_CLOUD_QA bands to the list of extractable Landsat 4-7 bands. QA_PIXEL, QA_RADSAT, QA_AEROSOL bands to the list of extractable Landsat 8-9 bands. AOT, WVP, SCL bands to the list of extractable Sentinel-2 bands.
 
 ## Changed
+
 - `calc_transform` function was relocated from the `preproc` to the `gistools` module.
 - `reproj_tile` and `merge_datatake` functions in the `preproc` submodule have been renamed to `reproj_tiles` and `merge_datatakes` respectively.
 - `src_bounding box` arg of the `gistools.calc_transform` function has been renamed to `bounding_box`. Now it also accepts a list of extent bounds as an input.
@@ -25,6 +53,7 @@
 - `src_crs` and `dst_crs` args of the `gistools.calc_transform` function are now required. The default of the `dst_round` arg is now 0 instead of 300.
 
 ## Fixed
+
 - `basetools.load_files` can now handle a list of strings as an input.
 - `gistools.calc_transform` now does the rounding if a `src_crs` is not given.
 - `gistools.BandSelector` now retains the datatype of the original image`
@@ -32,6 +61,7 @@
 # v0.7.2
 
 ## Fixed
+
 - Sentinel-2 processing no longer prints the bands of the images.
 - The merging of S2 L1C tiles is now functional.
 
@@ -51,6 +81,7 @@
 - Build metadata has been moved from `setup.py` to `pyproject.toml`.
 
 ## Fixed
+
 - Package building and installation using pip now works.
 - Functionality of `preproc.op_nc`.
 - `ovr` and `aux` args are now properly implemented for `preproc.make_extras`.

@@ -30,7 +30,6 @@ outside_catalog = {
     'datatake': ltpp.merge_datatakes,
     'preproc': ltpp.preproc,
     'reformat': ltpp.reformat,
-    'extras': ltpp.make_extras,
     'stack': ltgt.stack_images,
     'merge': ltgt.merge_images,
     'reproj': ltgt.reproj_image,
@@ -38,7 +37,7 @@ outside_catalog = {
 
 ### Inner functions, not included in the catalogue
 def arg_type(arg):
-    """Casts string argument into correct int, float or string type."""
+    """Tries to cast input arg into correct type."""
 
     if re.fullmatch(r'\d+', arg):
         return int(arg)
